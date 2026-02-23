@@ -27,15 +27,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
-from database import (
+from ingestion.database import (
     init_db, upsert_asset, deactivate_asset, get_all_active_tickers,
     get_asset, start_run, complete_run, get_recent_runs, get_universe_summary,
     get_pending_notifications, mark_notifications_processed,
 )
-from classifiers import (
+from ingestion.classifiers import (
     classify_asset, is_liquid_enough, is_allowed_exchange, normalise_ticker
 )
-from fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
+from ingestion.fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
 
 logging.basicConfig(
     level=logging.INFO,
