@@ -22,7 +22,7 @@
 const{useState,useEffect,useCallback,useRef}=React;
 
 // ── API ───────────────────────────────────────────────────────
-const API_BASE="";// same origin — no need for full URL
+const API_BASE="";
 async function fetchLivePrices(tickers){
   try{
     const res=await fetch(`${API_BASE}/api/prices?symbols=${tickers.join(",")}`,{signal:AbortSignal.timeout(10000)});
@@ -30,6 +30,29 @@ async function fetchLivePrices(tickers){
     const j=await res.json();
     return j.data||null;
   }catch(e){console.warn("Live fetch failed:",e);return null;}
+}
+// Fetch real FX rates from Yahoo Finance via our backend
+async function fetchFxRates(){
+  try{
+    // Fetch GBP pairs: GBPUSD, GBPEUR, GBPJPY etc
+    const pairs="GBPUSD=X,GBPEUR=X,GBPJPY=X,GBPCAD=X,GBPAUD=X,GBPCHF=X,GBPINR=X,GBPSGD=X,GBPHKD=X";
+    const res=await fetch(`${API_BASE}/api/prices?symbols=${pairs}`,{signal:AbortSignal.timeout(10000)});
+    if(!res.ok) return null;
+    const j=await res.json();
+    if(!j.data) return null;
+    // Build a rates map: how many units of currency per 1 GBP
+    const rates={GBP:1.0};
+    const map={
+      "GBPUSD=X":"USD","GBPEUR=X":"EUR","GBPJPY=X":"JPY",
+      "GBPCAD=X":"CAD","GBPAUD=X":"AUD","GBPCHF=X":"CHF",
+      "GBPINR=X":"INR","GBPSGD=X":"SGD","GBPHKD=X":"HKD",
+    };
+    Object.entries(map).forEach(([sym,code])=>{
+      const d=j.data[sym];
+      if(d&&d.price) rates[code]=parseFloat(d.price);
+    });
+    return rates;
+  }catch(e){console.warn("FX fetch failed:",e);return null;}
 }
 
 // ── CONSTANTS ─────────────────────────────────────────────────
@@ -179,19 +202,37 @@ function App(){
   const[activeCurrency,setActiveCurrency]=useState(CURRENCIES[0]);
   const[showCurrencyModal,setShowCurrencyModal]=useState(false);
   const[lastUpdated,setLastUpdated]=useState(null);
+  const[fxRates,setFxRates]=useState(null); // live rates keyed by currency code
 
-  const USD_TO_GBP=1/1.27;
-  const toLocal=(usd)=>parseFloat((usd*activeCurrency.rate*USD_TO_GBP).toFixed(activeCurrency.rate>=100?0:2));
-  const fmtMoney=(usd)=>`${activeCurrency.symbol}${toLocal(usd)}`;
+  // Convert USD to selected currency using live FX rates
+  // fxRates stores "units per 1 GBP", so USD->GBP = 1/fxRates.USD, then GBP->target = fxRates[target]
+  const toLocal=(usd)=>{
+    let rate;
+    if(fxRates&&fxRates["USD"]&&fxRates[activeCurrency.code]!==undefined){
+      const usdPerGbp=fxRates["USD"];         // e.g. 1.27
+      const targetPerGbp=fxRates[activeCurrency.code]; // e.g. 1.0 for GBP
+      rate=targetPerGbp/usdPerGbp;            // USD -> target currency
+    } else {
+      // fallback to hardcoded rates
+      rate=activeCurrency.rate/1.27;
+    }
+    const val=usd*rate;
+    return parseFloat(val.toFixed(val>100?2:4));
+  };
+  const fmtMoney=(usd)=>{
+    const val=toLocal(usd);
+    return`${activeCurrency.symbol}${val.toFixed(val>1000?2:val>100?2:2)}`;
+  };
 
   const doRefresh=useCallback(async()=>{
     const key=Date.now();
     const sigs={};
     ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key);});
-    // fetch live prices
+    // fetch live prices and FX rates in parallel
     try{
       const tickers=ASSETS.map(a=>a.ticker);
-      const liveData=await fetchLivePrices(tickers);
+      const[liveData,liveFx]=await Promise.all([fetchLivePrices(tickers),fetchFxRates()]);
+      if(liveFx) setFxRates(liveFx);
       if(liveData){
         let count=0;
         ASSETS.forEach(a=>{
