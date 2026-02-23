@@ -251,7 +251,7 @@ function App(){
   },[]);
 
   useEffect(()=>{doRefresh();},[]);
-  useEffect(()=>{const t=setInterval(doRefresh,30000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{const t=setInterval(doRefresh,10000);return()=>clearInterval(t);},[]);
 
   const sectors=["All",...new Set(ASSETS.map(a=>a.sector))];
 
