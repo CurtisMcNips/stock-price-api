@@ -1,402 +1,1457 @@
-"""
-Stock Price API + User Auth
-FastAPI backend with JWT authentication, user accounts, persistent portfolios
-"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Market Brain v7</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#03030a;color:#dde0ff;font-family:'DM Mono','Courier New',monospace;height:100vh;overflow:hidden;}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#0a0a14;}::-webkit-scrollbar-thumb{background:#1a1a2e;border-radius:2px;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes glow{0%,100%{box-shadow:0 0 20px #00b0ff22}50%{box-shadow:0 0 40px #00b0ff44}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+.fade{animation:fadeIn 0.25s ease;}
+.slide{animation:slideIn 0.2s ease;}
+input{outline:none;font-family:inherit;}
+button{font-family:inherit;cursor:pointer;}
+.hero-btn{transition:all 0.2s;}
+.hero-btn:hover{transform:translateY(-2px);}
+.card-hover:hover{border-color:#00b0ff44!important;background:#09091a!important;}
+select{font-family:inherit;outline:none;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useRef,useMemo}=React;
 
-import asyncio
-import json
-import logging
-import os
-import time
-import hashlib
-import hmac
-import base64
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Dict, List, Optional
-
-import httpx
-import redis.asyncio as aioredis
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends, Header
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, EmailStr
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger(__name__)
-
-# ── Config ────────────────────────────────────────────────────
-REDIS_URL    = os.environ.get("REDIS_URL", "redis://localhost:6379")
-SECRET_KEY   = os.environ.get("SECRET_KEY", "change-me-in-production-railway-env")
-CACHE_TTL    = 5
-TOKEN_TTL    = 60 * 60 * 24 * 30   # 30 days
-REQUEST_TIMEOUT = 8
-
-YAHOO_URL          = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-YAHOO_FALLBACK_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Accept-Language": "en-US,en;q=0.9",
+// ── API ───────────────────────────────────────────────────────
+const API="";
+const api=async(path,opts={})=>{
+  const token=localStorage.getItem("mb_token");
+  const headers={"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})};
+  const res=await fetch(API+path,{headers,...opts});
+  const j=await res.json();
+  if(!res.ok) throw new Error(j.detail||"Request failed");
+  return j;
+};
+async function fetchLivePrices(tickers){
+  try{
+    const chunks=[];for(let i=0;i<tickers.length;i+=40)chunks.push(tickers.slice(i,i+40));
+    const results={};
+    for(const chunk of chunks){const j=await api(`/api/prices?symbols=${chunk.join(",")}`);Object.assign(results,j.data||{});}
+    return Object.keys(results).length>0?results:null;
+  }catch(e){return null;}
+}
+async function fetchFxRates(){
+  try{
+    const pairs="GBPUSD=X,GBPEUR=X,GBPJPY=X,GBPCAD=X,GBPAUD=X,GBPCHF=X,GBPINR=X,GBPSGD=X,GBPHKD=X,GBPNOK=X,GBPSEK=X,GBPDKK=X,GBPNZD=X,GBPZAR=X,GBPMXN=X,GBPBRL=X,GBPKRW=X,GBPTWD=X";
+    const j=await api(`/api/prices?symbols=${pairs}`);
+    if(!j.data) return null;
+    const rates={GBP:1.0};
+    const map={"GBPUSD=X":"USD","GBPEUR=X":"EUR","GBPJPY=X":"JPY","GBPCAD=X":"CAD","GBPAUD=X":"AUD","GBPCHF=X":"CHF","GBPINR=X":"INR","GBPSGD=X":"SGD","GBPHKD=X":"HKD","GBPNOK=X":"NOK","GBPSEK=X":"SEK","GBPDKK=X":"DKK","GBPNZD=X":"NZD","GBPZAR=X":"ZAR","GBPMXN=X":"MXN","GBPBRL=X":"BRL","GBPKRW=X":"KRW","GBPTWD=X":"TWD"};
+    Object.entries(map).forEach(([sym,code])=>{const d=j.data[sym];if(d?.price)rates[code]=parseFloat(d.price);});
+    return rates;
+  }catch(e){return null;}
 }
 
-# ── In-memory fallbacks ───────────────────────────────────────
-_memory_cache: Dict[str, dict] = {}
-_memory_users: Dict[str, dict] = {}       # email -> user record
-_memory_tokens: Dict[str, str] = {}       # token -> email
-_memory_portfolios: Dict[str, dict] = {}  # email -> portfolio
-redis_client: Optional[aioredis.Redis] = None
+// ── CURRENCIES ────────────────────────────────────────────────
+const CURRENCIES=[
+  {code:"GBP",symbol:"£",flag:"🇬🇧",name:"British Pound",fb:1.00},
+  {code:"USD",symbol:"$",flag:"🇺🇸",name:"US Dollar",fb:1.27},
+  {code:"EUR",symbol:"€",flag:"🇪🇺",name:"Euro",fb:1.17},
+  {code:"JPY",symbol:"¥",flag:"🇯🇵",name:"Japanese Yen",fb:192.5},
+  {code:"CAD",symbol:"C$",flag:"🇨🇦",name:"Canadian Dollar",fb:1.72},
+  {code:"AUD",symbol:"A$",flag:"🇦🇺",name:"Australian Dollar",fb:1.95},
+  {code:"CHF",symbol:"Fr",flag:"🇨🇭",name:"Swiss Franc",fb:1.13},
+  {code:"INR",symbol:"₹",flag:"🇮🇳",name:"Indian Rupee",fb:105.8},
+  {code:"SGD",symbol:"S$",flag:"🇸🇬",name:"Singapore Dollar",fb:1.71},
+  {code:"HKD",symbol:"HK$",flag:"🇭🇰",name:"Hong Kong Dollar",fb:9.93},
+  {code:"NOK",symbol:"kr",flag:"🇳🇴",name:"Norwegian Krone",fb:13.5},
+  {code:"SEK",symbol:"kr",flag:"🇸🇪",name:"Swedish Krona",fb:13.2},
+  {code:"NZD",symbol:"NZ$",flag:"🇳🇿",name:"New Zealand Dollar",fb:2.08},
+  {code:"ZAR",symbol:"R",flag:"🇿🇦",name:"South African Rand",fb:23.5},
+  {code:"MXN",symbol:"$",flag:"🇲🇽",name:"Mexican Peso",fb:21.8},
+  {code:"BRL",symbol:"R$",flag:"🇧🇷",name:"Brazilian Real",fb:6.3},
+  {code:"KRW",symbol:"₩",flag:"🇰🇷",name:"South Korean Won",fb:1680},
+];
 
+// ── ASSET PROFILES (pros/cons/positioning) ────────────────────
+const ASSET_PROFILES = {
+  "NVDA": {
+    overview:"NVIDIA is the dominant force in AI-era semiconductors, supplying GPUs for data centres, gaming, and autonomous systems. It sits at the heart of the generative AI infrastructure boom.",
+    pros:["Market leader in AI/ML accelerator chips with 80%+ data centre GPU share","Explosive revenue growth driven by hyperscaler demand (Microsoft, Google, Amazon)","Strong moat via CUDA software ecosystem — rivals take years to compete","Diversified revenue: Gaming, Data Centre, Professional Viz, Auto","Balance sheet is fortress-grade with minimal debt and $26B+ cash"],
+    cons:["Valuation stretched — trades at premium multiples, vulnerable to de-rating","Export restrictions to China risk significant revenue (previously ~25% of DC revenue)","Customer concentration risk — handful of hyperscalers drive most growth","Cyclical semiconductor sector — downturns can be severe and fast","AMD and custom silicon (Google TPUs, Amazon Trainium) gaining ground"],
+    strengths:["Strong uptrend with momentum regime; outperforms in risk-on, AI-narrative markets","High liquidity and clean technical structure — institutional favourite","Responsive to macro: rallies on dovish Fed/rate expectations"],
+    risks:["High beta — amplifies broad market drawdowns","Regulatory and geopolitical risk is elevated","Earnings misses or guidance cuts cause sharp drops"],
+    positioning:"Bullish trend regime. Currently positioned as a momentum/growth play. Volatility is moderate-high for large-cap.",
+    sources:["https://www.nvidia.com/en-us/investor-relations/","https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=NVDA"],
+    learningHook:"Classic growth momentum stock. Watch how price responds to earnings and rate decisions.",
+  },
+  "AAPL": {
+    overview:"Apple is the world's largest company by market cap, operating a tightly integrated hardware/software/services ecosystem. It generates massive, predictable free cash flow.",
+    pros:["Unmatched brand loyalty and ecosystem lock-in across 2B+ active devices","Services revenue (App Store, iCloud, Apple Pay) growing and high-margin","Massive buyback programme supports EPS growth mechanically","Strong balance sheet with $60B+ net cash","Defensive characteristics — holds up relatively well in risk-off environments"],
+    cons:["China revenue (~20%) exposed to geopolitical and competitive risk","iPhone cycle dependency — growth lumpy around annual launches","Regulatory pressure on App Store fees (EU DMA, US DoJ)","Limited AI differentiation vs peers — Apple Intelligence is behind curve","Premium valuation for a slower-growth business"],
+    strengths:["Low volatility, clean trend behaviour, institutional anchor stock","Benefits from falling rates — long duration asset","Good mean-reversion candidate after sharp drawdowns"],
+    risks:["Rarely a high-return trade in short timeframes","China shock or regulatory fine could reset valuation","Innovation disappointment risk growing"],
+    positioning:"Mild bullish bias, low volatility regime. Best suited for position or long-term timeframes.",
+    sources:["https://investor.apple.com/","https://www.apple.com/newsroom/"],
+    learningHook:"Perfect study in a quality compounding stock. Notice how it trades relative to the Nasdaq.",
+  },
+  "BTC-USD": {
+    overview:"Bitcoin is the original and largest cryptocurrency by market cap. It functions as a decentralised store of value and is increasingly treated as 'digital gold' by institutional investors.",
+    pros:["Fixed supply of 21M coins creates genuine scarcity mechanics","Growing institutional adoption — ETFs, corporate treasuries, sovereign funds","Network effect and first-mover advantage is enormous","Global, 24/7 market with no circuit breakers","Halving cycles historically precede major bull markets"],
+    cons:["Extreme volatility — 50-80% drawdowns are historical norm","No cash flows, dividends, or earnings to anchor valuation","Regulatory risk remains significant globally","Highly correlated to risk-on sentiment — not a true safe haven","Crypto winter cycles can last 12-24+ months"],
+    strengths:["Best-performing asset class over 5-10 year horizon historically","Momentum regime: when trending, trends are powerful","High beta to broader crypto market — leads altcoin cycle"],
+    risks:["Leverage-driven volatility means corrections are extreme","Exchange risk, hack risk, custody risk all real","Regulatory crackdown could impair liquidity"],
+    positioning:"Volatile, momentum-driven. Currently in post-halving cycle. High-volatility extreme regime.",
+    sources:["https://bitcoin.org/bitcoin.pdf","https://www.coindesk.com/","https://glassnode.com/"],
+    learningHook:"The ultimate study in narrative-driven, supply/demand asset pricing. Watch halving cycles.",
+  },
+  "GLD": {
+    overview:"SPDR Gold Shares (GLD) is the largest gold ETF, providing direct exposure to physical gold prices. Gold is the oldest store of value and a classic safe-haven asset.",
+    pros:["True safe-haven — outperforms in risk-off, recession, crisis environments","Inversely correlated to USD and real interest rates","Central bank buying at record levels supports demand structurally","Zero counterparty risk — physical-backed ETF","Portfolio diversifier — low long-run correlation to equities"],
+    cons:["No yield — generates no income, unlike bonds or dividend stocks","Performs poorly in risk-on, rising-rate environments","Storage and ETF management costs erode returns slightly","Not a productive asset — value driven entirely by sentiment/macro","Short-term volatility can be sharp around FOMC/USD events"],
+    strengths:["Clean technical structure — respects key S/R levels well","Mean-reversion and trend-following both work in different regimes","Macro sensitivity is predictable: weak USD + falling real rates = bullish"],
+    risks:["Rate hike cycles are its worst enemy","Strong USD periods cause underperformance","Liquidity is good but institutional flows dominate"],
+    positioning:"Mild bullish bias driven by rate-cut expectations and geopolitical tension. Defensive positioning.",
+    sources:["https://www.spdrgoldshares.com/","https://www.gold.org/"],
+    learningHook:"Gold is the macro textbook asset. Study its relationship with USD, real yields, and risk sentiment.",
+  },
+  "TSLA": {
+    overview:"Tesla is an EV manufacturer, energy storage company, and AI/robotics aspirant. It is one of the most polarising and traded equities in the world.",
+    pros:["First-mover advantage in EV with global Supercharger network moat","Energy storage (Megapack) and solar growing fast","FSD/Autopilot and robotics optionality — Optimus could be transformative","Elon Musk's vision attracts cult-like retail following","Strong brand and software-driven margin improvement potential"],
+    cons:["EV market increasingly competitive — BYD, NIO, Rivian, legacy OEMs","Margin compression from price cuts is structural challenge","Musk distraction (X, SpaceX, politics) creates brand and execution risk","Valuation still extreme relative to auto industry peers","High retail concentration makes price action unpredictable"],
+    strengths:["Extremely high volume and liquidity — easy to trade","Momentum and narrative-driven — perfect for swing trading","Earnings and delivery data are predictable catalysts"],
+    risks:["Volatile — can drop 15%+ in single sessions","Retail-driven price action can be irrational in both directions","Short interest is substantial — beware short squeezes and collapses"],
+    positioning:"High volatility, mixed trend. Suitable for swing and intraday traders with tight risk management.",
+    sources:["https://ir.tesla.com/","https://cleantechnica.com/category/clean-transport/tesla/"],
+    learningHook:"Tesla is the textbook high-beta, narrative stock. Study how sentiment and data interact.",
+  },
+  "XOM": {
+    overview:"ExxonMobil is the largest US oil and gas company, an integrated major with upstream, downstream, and chemicals operations across 50+ countries.",
+    pros:["Massive scale and diversification reduces single-project risk","Strong dividend track record — Dividend Aristocrat for 40+ years","Benefits directly from oil price spikes and geopolitical tension","Pioneer acquisition accelerates Permian Basin leadership","Solid balance sheet with significant buyback capacity"],
+    cons:["Direct exposure to oil price volatility — margin compression in down cycles","Stranded asset risk as energy transition accelerates","Regulatory and political risk from emissions/climate legislation","Capex-heavy business limits free cash flow in low-price environments","Long-cycle projects limit agility"],
+    strengths:["Defensive, income-producing asset with low intraday volatility","Energy sector tends to lead in inflationary regimes","Pairs well with geopolitical risk hedging"],
+    risks:["Oil demand destruction from EVs is a 10-year structural headwind","Political and ESG pressure limits institutional ownership","Correlated to crude — crude collapse = stock collapse"],
+    positioning:"Cyclical positioning tied to oil regime. Currently range-bound with dividend support.",
+    sources:["https://corporate.exxonmobil.com/investors","https://www.eia.gov/"],
+    learningHook:"Classic cyclical stock. Study its correlation to WTI crude and how it behaves across commodity cycles.",
+  },
+};
 
-# ── Redis ─────────────────────────────────────────────────────
-async def get_redis() -> Optional[aioredis.Redis]:
-    global redis_client
-    if redis_client:
-        try:
-            await redis_client.ping()
-            return redis_client
-        except Exception:
-            redis_client = None
-    try:
-        redis_client = await aioredis.from_url(REDIS_URL, decode_responses=True, socket_timeout=2)
-        await redis_client.ping()
-        log.info("Redis connected")
-        return redis_client
-    except Exception as e:
-        log.warning(f"Redis unavailable ({e}) - using memory")
-        return None
+// ── FULL ASSET LIST (260+) ────────────────────────────────────
+const ASSETS=[
+  // ── Technology: Semiconductors
+  {ticker:"NVDA",name:"NVIDIA",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[100,200],vol:"Med"},
+  {ticker:"AMD",name:"AMD",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[80,180],vol:"Med"},
+  {ticker:"INTC",name:"Intel",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[18,45],vol:"Med"},
+  {ticker:"TSM",name:"TSMC",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[100,190],vol:"Med"},
+  {ticker:"AVGO",name:"Broadcom",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[700,1900],vol:"Med"},
+  {ticker:"QCOM",name:"Qualcomm",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[120,200],vol:"Med"},
+  {ticker:"MU",name:"Micron Technology",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[60,150],vol:"High"},
+  {ticker:"AMAT",name:"Applied Materials",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[130,230],vol:"Med"},
+  {ticker:"LRCX",name:"Lam Research",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[600,1100],vol:"Med"},
+  {ticker:"ASML",name:"ASML Holding",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[600,1000],vol:"Med"},
+  // ── Technology: Software
+  {ticker:"MSFT",name:"Microsoft",sector:"Technology",sub:"Software",cap:"Large",priceRange:[300,500],vol:"Low"},
+  {ticker:"GOOGL",name:"Alphabet",sector:"Technology",sub:"Software",cap:"Large",priceRange:[140,200],vol:"Low"},
+  {ticker:"META",name:"Meta Platforms",sector:"Technology",sub:"Social Media",cap:"Large",priceRange:[300,600],vol:"Med"},
+  {ticker:"CRM",name:"Salesforce",sector:"Technology",sub:"Software",cap:"Large",priceRange:[200,350],vol:"Med"},
+  {ticker:"NOW",name:"ServiceNow",sector:"Technology",sub:"Software",cap:"Large",priceRange:[600,950],vol:"Med"},
+  {ticker:"ADBE",name:"Adobe",sector:"Technology",sub:"Software",cap:"Large",priceRange:[400,600],vol:"Med"},
+  {ticker:"ORCL",name:"Oracle",sector:"Technology",sub:"Software",cap:"Large",priceRange:[100,180],vol:"Low"},
+  {ticker:"SNOW",name:"Snowflake",sector:"Technology",sub:"Software",cap:"Mid",priceRange:[120,220],vol:"High"},
+  {ticker:"PLTR",name:"Palantir",sector:"Technology",sub:"Software",cap:"Mid",priceRange:[15,40],vol:"VHigh"},
+  {ticker:"DDOG",name:"Datadog",sector:"Technology",sub:"Software",cap:"Mid",priceRange:[80,150],vol:"High"},
+  {ticker:"ZS",name:"Zscaler",sector:"Technology",sub:"Cybersecurity",cap:"Mid",priceRange:[150,250],vol:"High"},
+  {ticker:"S",name:"SentinelOne",sector:"Technology",sub:"Cybersecurity",cap:"Mid",priceRange:[15,30],vol:"High"},
+  // ── Technology: Hardware & Cloud
+  {ticker:"AAPL",name:"Apple",sector:"Technology",sub:"Hardware",cap:"Large",priceRange:[150,230],vol:"Low"},
+  {ticker:"DELL",name:"Dell Technologies",sector:"Technology",sub:"Hardware",cap:"Large",priceRange:[80,160],vol:"Med"},
+  {ticker:"HPQ",name:"HP Inc",sector:"Technology",sub:"Hardware",cap:"Large",priceRange:[25,40],vol:"Low"},
+  {ticker:"AMZN",name:"Amazon",sector:"Technology",sub:"Cloud & E-Comm",cap:"Large",priceRange:[120,220],vol:"Med"},
+  {ticker:"NET",name:"Cloudflare",sector:"Technology",sub:"Cloud",cap:"Mid",priceRange:[50,130],vol:"High"},
+  // ── Technology: AI & Robotics
+  {ticker:"SOUN",name:"SoundHound AI",sector:"Technology",sub:"AI / ML",cap:"Micro",priceRange:[3,18],vol:"VHigh"},
+  {ticker:"BBAI",name:"BigBear.ai",sector:"Technology",sub:"AI / ML",cap:"Micro",priceRange:[1,8],vol:"VHigh"},
+  {ticker:"AI",name:"C3.ai",sector:"Technology",sub:"AI / ML",cap:"Small",priceRange:[20,45],vol:"VHigh"},
+  {ticker:"RXRX",name:"Recursion Pharma",sector:"Healthcare",sub:"AI / Biotech",cap:"Small",priceRange:[3,20],vol:"High"},
+  // ── Technology: Cybersecurity
+  {ticker:"CRWD",name:"CrowdStrike",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[200,380],vol:"Med"},
+  {ticker:"PANW",name:"Palo Alto Networks",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[150,400],vol:"Med"},
+  {ticker:"FTNT",name:"Fortinet",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[55,90],vol:"Med"},
+  // ── Technology: Quantum Computing
+  {ticker:"IONQ",name:"IonQ",sector:"Technology",sub:"Quantum",cap:"Small",priceRange:[6,40],vol:"High"},
+  {ticker:"QUBT",name:"Quantum Computing",sector:"Technology",sub:"Quantum",cap:"Nano",priceRange:[0.5,8],vol:"Extreme"},
+  {ticker:"RGTI",name:"Rigetti Computing",sector:"Technology",sub:"Quantum",cap:"Nano",priceRange:[1,10],vol:"Extreme"},
+  {ticker:"QBTS",name:"D-Wave Quantum",sector:"Technology",sub:"Quantum",cap:"Micro",priceRange:[2,15],vol:"Extreme"},
+  // ── Healthcare
+  {ticker:"MRNA",name:"Moderna",sector:"Healthcare",sub:"Pharma",cap:"Mid",priceRange:[35,130],vol:"High"},
+  {ticker:"PFE",name:"Pfizer",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[20,50],vol:"Low"},
+  {ticker:"JNJ",name:"Johnson & Johnson",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[140,175],vol:"Low"},
+  {ticker:"LLY",name:"Eli Lilly",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[500,900],vol:"Med"},
+  {ticker:"NVO",name:"Novo Nordisk",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[70,130],vol:"Med"},
+  {ticker:"ABBV",name:"AbbVie",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[140,200],vol:"Low"},
+  {ticker:"BMY",name:"Bristol Myers Squibb",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[40,70],vol:"Med"},
+  {ticker:"MRK",name:"Merck & Co",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[100,130],vol:"Low"},
+  {ticker:"GILD",name:"Gilead Sciences",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[65,95],vol:"Low"},
+  {ticker:"VRTX",name:"Vertex Pharma",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[350,500],vol:"Med"},
+  {ticker:"REGN",name:"Regeneron",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[700,1100],vol:"Med"},
+  {ticker:"BIIB",name:"Biogen",sector:"Healthcare",sub:"Pharma",cap:"Mid",priceRange:[200,300],vol:"Med"},
+  {ticker:"NTLA",name:"Intellia Therapeutics",sector:"Healthcare",sub:"Gene Editing",cap:"Small",priceRange:[10,55],vol:"High"},
+  {ticker:"BEAM",name:"Beam Therapeutics",sector:"Healthcare",sub:"Gene Editing",cap:"Small",priceRange:[10,35],vol:"High"},
+  {ticker:"EDIT",name:"Editas Medicine",sector:"Healthcare",sub:"Gene Editing",cap:"Micro",priceRange:[3,15],vol:"VHigh"},
+  {ticker:"ISRG",name:"Intuitive Surgical",sector:"Healthcare",sub:"MedTech",cap:"Large",priceRange:[300,450],vol:"Low"},
+  {ticker:"MDT",name:"Medtronic",sector:"Healthcare",sub:"MedTech",cap:"Large",priceRange:[70,90],vol:"Low"},
+  {ticker:"BSX",name:"Boston Scientific",sector:"Healthcare",sub:"MedTech",cap:"Large",priceRange:[60,90],vol:"Low"},
+  {ticker:"EW",name:"Edwards Lifesciences",sector:"Healthcare",sub:"MedTech",cap:"Mid",priceRange:[65,100],vol:"Med"},
+  {ticker:"DXCM",name:"DexCom",sector:"Healthcare",sub:"MedTech",cap:"Mid",priceRange:[60,100],vol:"High"},
+  {ticker:"INCY",name:"Incyte Corp",sector:"Healthcare",sub:"Biotech",cap:"Mid",priceRange:[50,80],vol:"Med"},
+  {ticker:"EXAS",name:"Exact Sciences",sector:"Healthcare",sub:"Diagnostics",cap:"Mid",priceRange:[30,70],vol:"High"},
+  {ticker:"HCA",name:"HCA Healthcare",sector:"Healthcare",sub:"Hospitals",cap:"Large",priceRange:[250,380],vol:"Low"},
+  {ticker:"UNH",name:"UnitedHealth Group",sector:"Healthcare",sub:"Insurance",cap:"Large",priceRange:[450,600],vol:"Low"},
+  {ticker:"CVS",name:"CVS Health",sector:"Healthcare",sub:"Retail Health",cap:"Large",priceRange:[55,80],vol:"Low"},
+  // ── Energy: Oil & Gas
+  {ticker:"XOM",name:"ExxonMobil",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[95,130],vol:"Low"},
+  {ticker:"BP",name:"BP plc",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[25,45],vol:"Low"},
+  {ticker:"CVX",name:"Chevron",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[130,175],vol:"Low"},
+  {ticker:"COP",name:"ConocoPhillips",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[100,140],vol:"Med"},
+  {ticker:"SLB",name:"SLB (Schlumberger)",sector:"Energy",sub:"Oil Services",cap:"Large",priceRange:[40,65],vol:"Med"},
+  {ticker:"HAL",name:"Halliburton",sector:"Energy",sub:"Oil Services",cap:"Large",priceRange:[25,45],vol:"Med"},
+  {ticker:"OXY",name:"Occidental Petroleum",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[50,80],vol:"Med"},
+  {ticker:"MPC",name:"Marathon Petroleum",sector:"Energy",sub:"Refining",cap:"Large",priceRange:[130,200],vol:"Med"},
+  {ticker:"PSX",name:"Phillips 66",sector:"Energy",sub:"Refining",cap:"Large",priceRange:[100,160],vol:"Med"},
+  {ticker:"VLO",name:"Valero Energy",sector:"Energy",sub:"Refining",cap:"Large",priceRange:[130,180],vol:"Med"},
+  {ticker:"LNG",name:"Cheniere Energy",sector:"Energy",sub:"LNG",cap:"Large",priceRange:[130,200],vol:"Med"},
+  {ticker:"CTRA",name:"Coterra Energy",sector:"Energy",sub:"Oil & Gas",cap:"Mid",priceRange:[20,35],vol:"Med"},
+  // ── Energy: Renewables
+  {ticker:"PLUG",name:"Plug Power",sector:"Energy",sub:"Hydrogen",cap:"Small",priceRange:[1,15],vol:"VHigh"},
+  {ticker:"FSLR",name:"First Solar",sector:"Energy",sub:"Solar",cap:"Mid",priceRange:[100,250],vol:"Med"},
+  {ticker:"ENPH",name:"Enphase Energy",sector:"Energy",sub:"Solar",cap:"Mid",priceRange:[60,150],vol:"High"},
+  {ticker:"SEDG",name:"SolarEdge",sector:"Energy",sub:"Solar",cap:"Small",priceRange:[15,60],vol:"High"},
+  {ticker:"NEE",name:"NextEra Energy",sector:"Energy",sub:"Renewables",cap:"Large",priceRange:[50,85],vol:"Low"},
+  {ticker:"BEP",name:"Brookfield Renewable",sector:"Energy",sub:"Renewables",cap:"Mid",priceRange:[20,35],vol:"Low"},
+  {ticker:"CWEN",name:"Clearway Energy",sector:"Energy",sub:"Renewables",cap:"Small",priceRange:[20,35],vol:"Low"},
+  {ticker:"NOVA",name:"Sunnova Energy",sector:"Energy",sub:"Solar",cap:"Micro",priceRange:[2,15],vol:"VHigh"},
+  {ticker:"RUN",name:"Sunrun",sector:"Energy",sub:"Solar",cap:"Small",priceRange:[8,25],vol:"High"},
+  // ── Metals
+  {ticker:"GLD",name:"SPDR Gold ETF",sector:"Metals",sub:"Gold",cap:"Large",priceRange:[170,230],vol:"Low"},
+  {ticker:"SLV",name:"iShares Silver ETF",sector:"Metals",sub:"Silver",cap:"Mid",priceRange:[20,35],vol:"Med"},
+  {ticker:"GFI",name:"Gold Fields",sector:"Metals",sub:"Gold Miners",cap:"Mid",priceRange:[10,20],vol:"Med"},
+  {ticker:"NEM",name:"Newmont Mining",sector:"Metals",sub:"Gold Miners",cap:"Large",priceRange:[35,55],vol:"Med"},
+  {ticker:"AEM",name:"Agnico Eagle",sector:"Metals",sub:"Gold Miners",cap:"Large",priceRange:[50,80],vol:"Med"},
+  {ticker:"AU",name:"AngloGold Ashanti",sector:"Metals",sub:"Gold Miners",cap:"Mid",priceRange:[18,32],vol:"Med"},
+  {ticker:"FCX",name:"Freeport-McMoRan",sector:"Metals",sub:"Copper",cap:"Large",priceRange:[35,60],vol:"Med"},
+  {ticker:"SCCO",name:"Southern Copper",sector:"Metals",sub:"Copper",cap:"Large",priceRange:[70,120],vol:"Med"},
+  {ticker:"NUE",name:"Nucor Steel",sector:"Metals",sub:"Steel",cap:"Large",priceRange:[120,180],vol:"Med"},
+  {ticker:"STLD",name:"Steel Dynamics",sector:"Metals",sub:"Steel",cap:"Large",priceRange:[90,150],vol:"Med"},
+  {ticker:"CLF",name:"Cleveland-Cliffs",sector:"Metals",sub:"Steel",cap:"Mid",priceRange:[10,25],vol:"High"},
+  {ticker:"MP",name:"MP Materials",sector:"Metals",sub:"Rare Earth",cap:"Small",priceRange:[10,25],vol:"High"},
+  {ticker:"RGLD",name:"Royal Gold",sector:"Metals",sub:"Gold Royalties",cap:"Mid",priceRange:[100,160],vol:"Med"},
+  {ticker:"WPM",name:"Wheaton Precious Metals",sector:"Metals",sub:"Gold Royalties",cap:"Large",priceRange:[45,70],vol:"Med"},
+  // ── Minerals & Mining
+  {ticker:"LAC",name:"Lithium Americas",sector:"Minerals",sub:"Lithium",cap:"Small",priceRange:[2,20],vol:"VHigh"},
+  {ticker:"ALB",name:"Albemarle",sector:"Minerals",sub:"Lithium",cap:"Mid",priceRange:[40,150],vol:"High"},
+  {ticker:"SQM",name:"SQM",sector:"Minerals",sub:"Lithium",cap:"Mid",priceRange:[30,70],vol:"High"},
+  {ticker:"LTHM",name:"Livent Corp",sector:"Minerals",sub:"Lithium",cap:"Small",priceRange:[5,20],vol:"High"},
+  {ticker:"UEC",name:"Uranium Energy",sector:"Minerals",sub:"Uranium",cap:"Small",priceRange:[4,12],vol:"High"},
+  {ticker:"CCJ",name:"Cameco Corp",sector:"Minerals",sub:"Uranium",cap:"Mid",priceRange:[35,60],vol:"Med"},
+  {ticker:"URA",name:"Global X Uranium ETF",sector:"Minerals",sub:"Uranium",cap:"Mid",priceRange:[20,35],vol:"Med"},
+  {ticker:"NNE",name:"Nano Nuclear Energy",sector:"Minerals",sub:"Nuclear",cap:"Micro",priceRange:[5,45],vol:"Extreme"},
+  {ticker:"BHP",name:"BHP Group",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[40,70],vol:"Low"},
+  {ticker:"RIO",name:"Rio Tinto",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[55,80],vol:"Low"},
+  {ticker:"VALE",name:"Vale SA",sector:"Minerals",sub:"Iron Ore",cap:"Large",priceRange:[10,20],vol:"Med"},
+  {ticker:"AA",name:"Alcoa",sector:"Minerals",sub:"Aluminium",cap:"Mid",priceRange:[20,50],vol:"High"},
+  {ticker:"CENX",name:"Century Aluminum",sector:"Minerals",sub:"Aluminium",cap:"Small",priceRange:[12,25],vol:"High"},
+  {ticker:"TECK",name:"Teck Resources",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[35,60],vol:"Med"},
+  {ticker:"FMC",name:"FMC Corporation",sector:"Minerals",sub:"Chemicals",cap:"Mid",priceRange:[40,80],vol:"Med"},
+  // ── Crypto
+  {ticker:"BTC-USD",name:"Bitcoin",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[25000,100000],vol:"Extreme"},
+  {ticker:"ETH-USD",name:"Ethereum",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[1500,5000],vol:"Extreme"},
+  {ticker:"SOL-USD",name:"Solana",sector:"Crypto",sub:"Layer 1",cap:"Mid",priceRange:[20,250],vol:"Extreme"},
+  {ticker:"XRP-USD",name:"XRP",sector:"Crypto",sub:"Payments",cap:"Large",priceRange:[0.3,3],vol:"Extreme"},
+  {ticker:"BNB-USD",name:"BNB",sector:"Crypto",sub:"Exchange Token",cap:"Large",priceRange:[200,700],vol:"VHigh"},
+  {ticker:"ADA-USD",name:"Cardano",sector:"Crypto",sub:"Layer 1",cap:"Mid",priceRange:[0.2,1.5],vol:"Extreme"},
+  {ticker:"AVAX-USD",name:"Avalanche",sector:"Crypto",sub:"Layer 1",cap:"Mid",priceRange:[10,80],vol:"Extreme"},
+  {ticker:"DOT-USD",name:"Polkadot",sector:"Crypto",sub:"Layer 0",cap:"Mid",priceRange:[3,25],vol:"Extreme"},
+  {ticker:"LINK-USD",name:"Chainlink",sector:"Crypto",sub:"Oracle",cap:"Mid",priceRange:[5,30],vol:"Extreme"},
+  {ticker:"MATIC-USD",name:"Polygon",sector:"Crypto",sub:"Layer 2",cap:"Small",priceRange:[0.4,2.5],vol:"Extreme"},
+  {ticker:"DOGE-USD",name:"Dogecoin",sector:"Crypto",sub:"Meme",cap:"Mid",priceRange:[0.05,0.5],vol:"Extreme"},
+  {ticker:"SHIB-USD",name:"Shiba Inu",sector:"Crypto",sub:"Meme",cap:"Small",priceRange:[0.000005,0.00004],vol:"Extreme"},
+  {ticker:"UNI-USD",name:"Uniswap",sector:"Crypto",sub:"DeFi",cap:"Small",priceRange:[3,20],vol:"Extreme"},
+  {ticker:"AAVE-USD",name:"Aave",sector:"Crypto",sub:"DeFi",cap:"Small",priceRange:[50,300],vol:"Extreme"},
+  {ticker:"COIN",name:"Coinbase",sector:"Crypto",sub:"Exchange",cap:"Mid",priceRange:[100,330],vol:"VHigh"},
+  {ticker:"MSTR",name:"MicroStrategy",sector:"Crypto",sub:"BTC Treasury",cap:"Mid",priceRange:[100,600],vol:"Extreme"},
+  {ticker:"RIOT",name:"Riot Platforms",sector:"Crypto",sub:"BTC Mining",cap:"Small",priceRange:[5,25],vol:"VHigh"},
+  {ticker:"MARA",name:"Marathon Digital",sector:"Crypto",sub:"BTC Mining",cap:"Small",priceRange:[5,25],vol:"VHigh"},
+  {ticker:"CLSK",name:"CleanSpark",sector:"Crypto",sub:"BTC Mining",cap:"Small",priceRange:[5,20],vol:"VHigh"},
+  // ── Forex — Major Pairs
+  {ticker:"EURUSD=X",name:"EUR/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.05,1.15],vol:"Low"},
+  {ticker:"GBPUSD=X",name:"GBP/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.22,1.32],vol:"Low"},
+  {ticker:"USDJPY=X",name:"USD/JPY",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[130,155],vol:"Low"},
+  {ticker:"USDCAD=X",name:"USD/CAD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.30,1.40],vol:"Low"},
+  {ticker:"AUDUSD=X",name:"AUD/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[0.62,0.72],vol:"Low"},
+  {ticker:"NZDUSD=X",name:"NZD/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[0.57,0.66],vol:"Low"},
+  {ticker:"USDCHF=X",name:"USD/CHF",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[0.87,0.97],vol:"Low"},
+  // ── Forex — Cross Pairs
+  {ticker:"EURGBP=X",name:"EUR/GBP",sector:"Forex",sub:"Cross Pair",cap:"Large",priceRange:[0.84,0.92],vol:"Low"},
+  {ticker:"EURJPY=X",name:"EUR/JPY",sector:"Forex",sub:"Cross Pair",cap:"Large",priceRange:[140,165],vol:"Low"},
+  {ticker:"GBPJPY=X",name:"GBP/JPY",sector:"Forex",sub:"Cross Pair",cap:"Large",priceRange:[163,195],vol:"Med"},
+  {ticker:"AUDNZD=X",name:"AUD/NZD",sector:"Forex",sub:"Cross Pair",cap:"Large",priceRange:[1.05,1.12],vol:"Low"},
+  {ticker:"EURCHF=X",name:"EUR/CHF",sector:"Forex",sub:"Cross Pair",cap:"Large",priceRange:[0.93,1.00],vol:"Low"},
+  // ── Forex — Emerging Market
+  {ticker:"USDMXN=X",name:"USD/MXN",sector:"Forex",sub:"EM Pair",cap:"Large",priceRange:[16,20],vol:"Med"},
+  {ticker:"USDBRL=X",name:"USD/BRL",sector:"Forex",sub:"EM Pair",cap:"Large",priceRange:[4.8,6.0],vol:"Med"},
+  {ticker:"USDINR=X",name:"USD/INR",sector:"Forex",sub:"EM Pair",cap:"Large",priceRange:[82,88],vol:"Low"},
+  {ticker:"USDCNH=X",name:"USD/CNH",sector:"Forex",sub:"EM Pair",cap:"Large",priceRange:[7.0,7.4],vol:"Low"},
+  {ticker:"USDZAR=X",name:"USD/ZAR",sector:"Forex",sub:"EM Pair",cap:"Large",priceRange:[18,20],vol:"Med"},
+  {ticker:"USDTRY=X",name:"USD/TRY",sector:"Forex",sub:"EM Pair",cap:"Large",priceRange:[28,35],vol:"Med"},
+  // ── Space & Defence
+  {ticker:"RKLB",name:"Rocket Lab USA",sector:"Space",sub:"Launch",cap:"Small",priceRange:[4,26],vol:"High"},
+  {ticker:"ASTS",name:"AST SpaceMobile",sector:"Space",sub:"Satellite",cap:"Small",priceRange:[5,40],vol:"VHigh"},
+  {ticker:"LMT",name:"Lockheed Martin",sector:"Space",sub:"Defence",cap:"Large",priceRange:[400,550],vol:"Low"},
+  {ticker:"RTX",name:"RTX Corporation",sector:"Space",sub:"Defence",cap:"Large",priceRange:[90,130],vol:"Low"},
+  {ticker:"NOC",name:"Northrop Grumman",sector:"Space",sub:"Defence",cap:"Large",priceRange:[400,530],vol:"Low"},
+  {ticker:"GD",name:"General Dynamics",sector:"Space",sub:"Defence",cap:"Large",priceRange:[240,310],vol:"Low"},
+  {ticker:"BA",name:"Boeing",sector:"Space",sub:"Aerospace",cap:"Large",priceRange:[150,280],vol:"High"},
+  {ticker:"SPCE",name:"Virgin Galactic",sector:"Space",sub:"Space Tourism",cap:"Micro",priceRange:[1,8],vol:"Extreme"},
+  {ticker:"AXON",name:"Axon Enterprise",sector:"Space",sub:"Defence Tech",cap:"Mid",priceRange:[200,400],vol:"Med"},
+  // ── Consumer
+  {ticker:"TSLA",name:"Tesla",sector:"Consumer",sub:"EV",cap:"Large",priceRange:[150,400],vol:"High"},
+  {ticker:"NFLX",name:"Netflix",sector:"Consumer",sub:"Streaming",cap:"Large",priceRange:[400,800],vol:"Med"},
+  {ticker:"DIS",name:"Walt Disney",sector:"Consumer",sub:"Entertainment",cap:"Large",priceRange:[80,120],vol:"Med"},
+  {ticker:"GME",name:"GameStop",sector:"Consumer",sub:"Gaming",cap:"Small",priceRange:[8,30],vol:"Extreme"},
+  {ticker:"NKE",name:"Nike",sector:"Consumer",sub:"Apparel",cap:"Large",priceRange:[70,120],vol:"Low"},
+  {ticker:"LULU",name:"Lululemon",sector:"Consumer",sub:"Apparel",cap:"Large",priceRange:[280,480],vol:"Med"},
+  {ticker:"SBUX",name:"Starbucks",sector:"Consumer",sub:"Food & Drink",cap:"Large",priceRange:[75,110],vol:"Low"},
+  {ticker:"MCD",name:"McDonald's",sector:"Consumer",sub:"Food & Drink",cap:"Large",priceRange:[250,310],vol:"Low"},
+  {ticker:"CMG",name:"Chipotle",sector:"Consumer",sub:"Food & Drink",cap:"Large",priceRange:[50,65],vol:"Med"},
+  {ticker:"WMT",name:"Walmart",sector:"Consumer",sub:"Retail",cap:"Large",priceRange:[55,90],vol:"Low"},
+  {ticker:"TGT",name:"Target",sector:"Consumer",sub:"Retail",cap:"Large",priceRange:[100,160],vol:"Med"},
+  {ticker:"COST",name:"Costco",sector:"Consumer",sub:"Retail",cap:"Large",priceRange:[700,1000],vol:"Low"},
+  {ticker:"TJX",name:"TJX Companies",sector:"Consumer",sub:"Retail",cap:"Large",priceRange:[80,110],vol:"Low"},
+  {ticker:"ABNB",name:"Airbnb",sector:"Consumer",sub:"Travel",cap:"Large",priceRange:[110,175],vol:"Med"},
+  {ticker:"BKNG",name:"Booking Holdings",sector:"Consumer",sub:"Travel",cap:"Large",priceRange:[3000,4500],vol:"Med"},
+  {ticker:"LVS",name:"Las Vegas Sands",sector:"Consumer",sub:"Gaming & Leisure",cap:"Large",priceRange:[40,65],vol:"Med"},
+  {ticker:"WYNN",name:"Wynn Resorts",sector:"Consumer",sub:"Gaming & Leisure",cap:"Mid",priceRange:[80,120],vol:"Med"},
+  {ticker:"RIVN",name:"Rivian Automotive",sector:"Consumer",sub:"EV",cap:"Small",priceRange:[8,25],vol:"VHigh"},
+  {ticker:"LCID",name:"Lucid Group",sector:"Consumer",sub:"EV",cap:"Micro",priceRange:[2,8],vol:"VHigh"},
+  // ── Finance
+  {ticker:"JPM",name:"JPMorgan Chase",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[150,230],vol:"Low"},
+  {ticker:"GS",name:"Goldman Sachs",sector:"Finance",sub:"Investment Banking",cap:"Large",priceRange:[350,550],vol:"Med"},
+  {ticker:"MS",name:"Morgan Stanley",sector:"Finance",sub:"Investment Banking",cap:"Large",priceRange:[80,130],vol:"Low"},
+  {ticker:"BAC",name:"Bank of America",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[28,45],vol:"Low"},
+  {ticker:"WFC",name:"Wells Fargo",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[40,65],vol:"Low"},
+  {ticker:"C",name:"Citigroup",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[45,75],vol:"Med"},
+  {ticker:"V",name:"Visa",sector:"Finance",sub:"Payments",cap:"Large",priceRange:[220,310],vol:"Low"},
+  {ticker:"MA",name:"Mastercard",sector:"Finance",sub:"Payments",cap:"Large",priceRange:[400,530],vol:"Low"},
+  {ticker:"AXP",name:"American Express",sector:"Finance",sub:"Payments",cap:"Large",priceRange:[170,250],vol:"Low"},
+  {ticker:"PYPL",name:"PayPal",sector:"Finance",sub:"Fintech",cap:"Large",priceRange:[55,100],vol:"Med"},
+  {ticker:"SQ",name:"Block (Square)",sector:"Finance",sub:"Fintech",cap:"Mid",priceRange:[50,100],vol:"High"},
+  {ticker:"SOFI",name:"SoFi Technologies",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[5,22],vol:"High"},
+  {ticker:"UPST",name:"Upstart Holdings",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[10,80],vol:"VHigh"},
+  {ticker:"AFRM",name:"Affirm Holdings",sector:"Finance",sub:"Fintech",cap:"Mid",priceRange:[15,50],vol:"VHigh"},
+  {ticker:"BLK",name:"BlackRock",sector:"Finance",sub:"Asset Management",cap:"Large",priceRange:[750,1050],vol:"Low"},
+  {ticker:"SCHW",name:"Charles Schwab",sector:"Finance",sub:"Brokerage",cap:"Large",priceRange:[60,90],vol:"Med"},
+  {ticker:"BRK-B",name:"Berkshire Hathaway B",sector:"Finance",sub:"Conglomerate",cap:"Large",priceRange:[320,410],vol:"Low"},
+  {ticker:"ICE",name:"Intercontinental Exchange",sector:"Finance",sub:"Exchanges",cap:"Large",priceRange:[120,160],vol:"Low"},
+  {ticker:"CME",name:"CME Group",sector:"Finance",sub:"Exchanges",cap:"Large",priceRange:[190,240],vol:"Low"},
+  {ticker:"HOOD",name:"Robinhood Markets",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[8,25],vol:"VHigh"},
+  // ── Agriculture & Food
+  {ticker:"ADM",name:"Archer-Daniels-Midland",sector:"Agriculture",sub:"Grain Processing",cap:"Large",priceRange:[45,80],vol:"Low"},
+  {ticker:"DE",name:"John Deere",sector:"Agriculture",sub:"Machinery",cap:"Large",priceRange:[350,500],vol:"Low"},
+  {ticker:"AGCO",name:"AGCO Corporation",sector:"Agriculture",sub:"Machinery",cap:"Mid",priceRange:[80,140],vol:"Med"},
+  {ticker:"BG",name:"Bunge Global",sector:"Agriculture",sub:"Grain Trading",cap:"Mid",priceRange:[80,120],vol:"Med"},
+  {ticker:"MOS",name:"Mosaic Company",sector:"Agriculture",sub:"Fertilisers",cap:"Mid",priceRange:[25,45],vol:"Med"},
+  {ticker:"NTR",name:"Nutrien",sector:"Agriculture",sub:"Fertilisers",cap:"Large",priceRange:[50,80],vol:"Med"},
+  {ticker:"CF",name:"CF Industries",sector:"Agriculture",sub:"Nitrogen Fertilisers",cap:"Mid",priceRange:[70,110],vol:"Med"},
+  {ticker:"CTVA",name:"Corteva",sector:"Agriculture",sub:"Crop Science",cap:"Large",priceRange:[45,70],vol:"Low"},
+  {ticker:"FMC",name:"FMC Corporation",sector:"Agriculture",sub:"Agricultural Chem",cap:"Mid",priceRange:[40,80],vol:"Med"},
+  // ── Commodities & Futures ETFs
+  {ticker:"USO",name:"US Oil Fund ETF",sector:"Commodities",sub:"Crude Oil",cap:"Large",priceRange:[60,90],vol:"Med"},
+  {ticker:"UNG",name:"US Natural Gas ETF",sector:"Commodities",sub:"Natural Gas",cap:"Mid",priceRange:[5,20],vol:"High"},
+  {ticker:"DBA",name:"Invesco Agri ETF",sector:"Commodities",sub:"Agricultural",cap:"Mid",priceRange:[18,25],vol:"Low"},
+  {ticker:"PDBC",name:"Invesco Optimum Yield Cmdty",sector:"Commodities",sub:"Broad Commodities",cap:"Mid",priceRange:[12,18],vol:"Low"},
+  {ticker:"CPER",name:"US Copper Index ETF",sector:"Commodities",sub:"Copper",cap:"Small",priceRange:[20,35],vol:"Med"},
+  {ticker:"PALL",name:"Aberdeen Physical Palladium",sector:"Commodities",sub:"Palladium",cap:"Small",priceRange:[80,200],vol:"Med"},
+  {ticker:"PPLT",name:"Aberdeen Physical Platinum",sector:"Commodities",sub:"Platinum",cap:"Small",priceRange:[70,110],vol:"Med"},
+  // ── Real Estate
+  {ticker:"AMT",name:"American Tower",sector:"Real Estate",sub:"REIT — Towers",cap:"Large",priceRange:[160,230],vol:"Low"},
+  {ticker:"PLD",name:"Prologis",sector:"Real Estate",sub:"REIT — Industrial",cap:"Large",priceRange:[100,140],vol:"Low"},
+  {ticker:"EQIX",name:"Equinix",sector:"Real Estate",sub:"REIT — Data Centres",cap:"Large",priceRange:[700,900],vol:"Low"},
+  {ticker:"SPG",name:"Simon Property Group",sector:"Real Estate",sub:"REIT — Retail",cap:"Large",priceRange:[130,180],vol:"Low"},
+  {ticker:"O",name:"Realty Income",sector:"Real Estate",sub:"REIT — Net Lease",cap:"Large",priceRange:[50,65],vol:"Low"},
+  {ticker:"VICI",name:"VICI Properties",sector:"Real Estate",sub:"REIT — Gaming",cap:"Large",priceRange:[28,38],vol:"Low"},
+  {ticker:"DLR",name:"Digital Realty Trust",sector:"Real Estate",sub:"REIT — Data Centres",cap:"Large",priceRange:[120,165],vol:"Low"},
+  {ticker:"WY",name:"Weyerhaeuser",sector:"Real Estate",sub:"Timberlands REIT",cap:"Large",priceRange:[28,38],vol:"Low"},
+  {ticker:"WELL",name:"Welltower",sector:"Real Estate",sub:"REIT — Healthcare",cap:"Large",priceRange:[90,115],vol:"Low"},
+  // ── Utilities
+  {ticker:"NEE",name:"NextEra Energy",sector:"Utilities",sub:"Electric — Renewables",cap:"Large",priceRange:[50,85],vol:"Low"},
+  {ticker:"DUK",name:"Duke Energy",sector:"Utilities",sub:"Electric",cap:"Large",priceRange:[90,115],vol:"Low"},
+  {ticker:"SO",name:"Southern Company",sector:"Utilities",sub:"Electric",cap:"Large",priceRange:[65,85],vol:"Low"},
+  {ticker:"D",name:"Dominion Energy",sector:"Utilities",sub:"Electric & Gas",cap:"Large",priceRange:[40,55],vol:"Low"},
+  {ticker:"AEP",name:"American Electric Power",sector:"Utilities",sub:"Electric",cap:"Large",priceRange:[80,105],vol:"Low"},
+  {ticker:"EXC",name:"Exelon",sector:"Utilities",sub:"Electric — Nuclear",cap:"Large",priceRange:[36,48],vol:"Low"},
+  {ticker:"AWK",name:"American Water Works",sector:"Utilities",sub:"Water",cap:"Large",priceRange:[120,155],vol:"Low"},
+  // ── Indices & Broad Market ETFs
+  {ticker:"SPY",name:"S&P 500 ETF",sector:"Indices",sub:"US Broad Market",cap:"Large",priceRange:[400,600],vol:"Low"},
+  {ticker:"QQQ",name:"Nasdaq 100 ETF",sector:"Indices",sub:"US Tech",cap:"Large",priceRange:[350,520],vol:"Low"},
+  {ticker:"IWM",name:"Russell 2000 ETF",sector:"Indices",sub:"US Small Cap",cap:"Large",priceRange:[160,230],vol:"Med"},
+  {ticker:"DIA",name:"Dow Jones ETF",sector:"Indices",sub:"US Large Cap",cap:"Large",priceRange:[330,450],vol:"Low"},
+  {ticker:"EEM",name:"iShares EM ETF",sector:"Indices",sub:"Emerging Markets",cap:"Large",priceRange:[35,55],vol:"Med"},
+  {ticker:"EFA",name:"iShares EAFE ETF",sector:"Indices",sub:"International Dev",cap:"Large",priceRange:[65,85],vol:"Low"},
+  {ticker:"VTI",name:"Vanguard Total Market ETF",sector:"Indices",sub:"US Total Market",cap:"Large",priceRange:[200,270],vol:"Low"},
+  {ticker:"GDX",name:"VanEck Gold Miners ETF",sector:"Indices",sub:"Gold Miners",cap:"Large",priceRange:[25,45],vol:"Med"},
+  {ticker:"ARKK",name:"ARK Innovation ETF",sector:"Indices",sub:"Disruptive Tech",cap:"Mid",priceRange:[35,80],vol:"High"},
+  {ticker:"SQQQ",name:"ProShares Ultra Short QQQ",sector:"Indices",sub:"Inverse 3x Tech",cap:"Mid",priceRange:[6,25],vol:"Extreme"},
+  {ticker:"TQQQ",name:"ProShares Ultra QQQ 3x",sector:"Indices",sub:"Leveraged 3x Tech",cap:"Mid",priceRange:[30,75],vol:"Extreme"},
+  // ── Industrials & Infrastructure
+  {ticker:"CAT",name:"Caterpillar",sector:"Industrials",sub:"Heavy Machinery",cap:"Large",priceRange:[250,400],vol:"Med"},
+  {ticker:"HON",name:"Honeywell",sector:"Industrials",sub:"Conglomerate",cap:"Large",priceRange:[180,240],vol:"Low"},
+  {ticker:"MMM",name:"3M Company",sector:"Industrials",sub:"Conglomerate",cap:"Large",priceRange:[90,130],vol:"Low"},
+  {ticker:"GE",name:"GE Aerospace",sector:"Industrials",sub:"Aerospace",cap:"Large",priceRange:[120,200],vol:"Med"},
+  {ticker:"EMR",name:"Emerson Electric",sector:"Industrials",sub:"Process Equipment",cap:"Large",priceRange:[90,120],vol:"Low"},
+  {ticker:"ROK",name:"Rockwell Automation",sector:"Industrials",sub:"Industrial Automation",cap:"Large",priceRange:[200,320],vol:"Med"},
+  {ticker:"UBER",name:"Uber Technologies",sector:"Industrials",sub:"Ride Share",cap:"Large",priceRange:[55,90],vol:"Med"},
+  {ticker:"LYFT",name:"Lyft",sector:"Industrials",sub:"Ride Share",cap:"Small",priceRange:[8,20],vol:"High"},
+  {ticker:"FDX",name:"FedEx",sector:"Industrials",sub:"Logistics",cap:"Large",priceRange:[230,310],vol:"Med"},
+  {ticker:"UPS",name:"UPS",sector:"Industrials",sub:"Logistics",cap:"Large",priceRange:[120,175],vol:"Low"},
+  {ticker:"CSX",name:"CSX Corporation",sector:"Industrials",sub:"Rail Transport",cap:"Large",priceRange:[30,42],vol:"Low"},
+  {ticker:"UNP",name:"Union Pacific",sector:"Industrials",sub:"Rail Transport",cap:"Large",priceRange:[220,270],vol:"Low"},
+  {ticker:"DAL",name:"Delta Air Lines",sector:"Industrials",sub:"Airlines",cap:"Large",priceRange:[35,55],vol:"Med"},
+  {ticker:"AAL",name:"American Airlines",sector:"Industrials",sub:"Airlines",cap:"Mid",priceRange:[10,20],vol:"High"},
+  {ticker:"CCL",name:"Carnival Corp",sector:"Industrials",sub:"Cruise Lines",cap:"Mid",priceRange:[15,25],vol:"High"},
+];
 
+const CAP_TIERS={Nano:0,Micro:1,Small:2,Mid:3,Large:4};
+const CAP_COLORS={Nano:"#ea80fc",Micro:"#ff6d00",Small:"#ffd600",Mid:"#00e676",Large:"#00b0ff"};
+const RISK_CFG={CRITICAL:{label:"CRITICAL",color:"#ff1744",bg:"#160004"},HIGH:{label:"HIGH",color:"#ff6d00",bg:"#160900"},MODERATE:{label:"MODERATE",color:"#ffd600",bg:"#141000"},POSITIVE:{label:"OPPORTUNITY",color:"#00e676",bg:"#00160a"},STRONG:{label:"STRONG",color:"#00b0ff",bg:"#00091a"}};
+const TF_PROFILES={"⚡ Intraday":{short:"0-24h",color:"#ff6d00",icon:"⚡",simDays:0.5},"📈 Short Swing":{short:"2-5d",color:"#ffd600",icon:"📈",simDays:3.5},"🌊 Medium Swing":{short:"1-4wk",color:"#00d4ff",icon:"🌊",simDays:17.5},"🏔️ Position":{short:"1-6mo",color:"#00e676",icon:"🏔️",simDays:105},"🌳 Long Term":{short:"6mo+",color:"#aed581",icon:"🌳",simDays:548}};
+const TF_KEYS=Object.keys(TF_PROFILES);
+const WATCH_DURATIONS=[{label:"24 hours",ms:86400000,tf:"⚡ Intraday"},{label:"3 days",ms:259200000,tf:"📈 Short Swing"},{label:"5 days",ms:432000000,tf:"📈 Short Swing"},{label:"1 week",ms:604800000,tf:"🌊 Medium Swing"},{label:"2 weeks",ms:1209600000,tf:"🌊 Medium Swing"},{label:"1 month",ms:2592000000,tf:"🏔️ Position"},{label:"3 months",ms:7776000000,tf:"🏔️ Position"},{label:"6 months",ms:15552000000,tf:"🌳 Long Term"}];
+const SECTORS=["All",...new Set(ASSETS.map(a=>a.sector))];
+const CAPS=["All","Nano","Micro","Small","Mid","Large"];
+const VOL_LABELS={Low:"🟢 Low",Med:"🟡 Medium",High:"🟠 High",VHigh:"🔴 V.High",Extreme:"💀 Extreme"};
 
-async def rget(key: str) -> Optional[str]:
-    r = await get_redis()
-    if r:
-        try: return await r.get(key)
-        except: pass
-    return None
+// ── SIGNALS ───────────────────────────────────────────────────
+function sr(seed,min,max){const x=Math.sin(seed+1)*10000;return min+(x-Math.floor(x))*(max-min);}
+function generateSignals(asset,key){
+  const s=asset.ticker.split("").reduce((a,c)=>a+c.charCodeAt(0),0)+key;
+  const r=(min,max,o=0)=>sr(s+o,min,max);
+  const capTier=CAP_TIERS[asset.cap]??2;
+  const volMod={Low:0.6,Med:0.8,High:1.0,VHigh:1.2,Extreme:1.5}[asset.vol]||1;
+  const rsi=r(18,82,1),macd=r(-1,1,2),volume=r(0.4,4.0,3),sentiment=r(-1,1,4);
+  const shortInt=r(0,35,5),earningsBeat=r(-25,40,6),priceVsMA50=r(-30,40,7),priceVsMA200=r(-40,50,8);
+  const insiderBuy=r(0,1,9),catalystNews=r(-1,1,10),sectorFlow=r(-1,1,11);
+  const daysToEarnings=r(0,90,13),debtRatio=r(0,3,14),revGrowth=r(-20,120,15);
+  let score=0;
+  score+=rsi<30?22:rsi>72?-18:(50-rsi)*0.3;
+  score+=macd*18;score+=(volume-1)*10;score+=sentiment*22;
+  score+=shortInt>25?-18:shortInt<5?12:0;
+  score+=earningsBeat*0.5;score+=priceVsMA50<-20?14:priceVsMA50>30?-10:0;
+  score+=insiderBuy>0.7?18:0;score+=catalystNews*18;score+=sectorFlow*12;
+  score+=revGrowth>50?18:revGrowth<-10?-12:0;score+=debtRatio>2?-14:0;
+  if(asset.sector==="Technology")score+=sectorFlow>0.3?15:0;
+  if(asset.sub==="Uranium"||asset.sub==="Nuclear")score+=18;
+  if(asset.sector==="Space")score+=12;
+  if(asset.sector==="Crypto")score+=r(0,1,34)>0.5?18:-14;
+  if(asset.sector==="Metals")score+=r(0,1,35)>0.4?10:0;
+  if(asset.sector==="Forex")score=score*0.4;
+  score=Math.max(-100,Math.min(100,score));
+  const risk=score<-55?"CRITICAL":score<-15?"HIGH":score<18?"MODERATE":score<55?"POSITIVE":"STRONG";
+  const price=sr(s+42,asset.priceRange[0],asset.priceRange[1]);
+  const stopPct=capTier<=1?0.15:capTier===2?0.10:asset.sector==="Forex"?0.02:0.07;
+  const maxUpside=capTier===0?400:capTier===1?200:capTier===2?100:capTier===3?50:asset.sector==="Crypto"?200:30;
+  const upsidePct=score>0?(score/100)*maxUpside:0;
+  const rrRatio=stopPct>0?((upsidePct/100)/stopPct).toFixed(1):"0";
+  const entryQ=rsi<35&&priceVsMA50<-10?"IDEAL":rsi<50&&volume>1.2?"GOOD":rsi>68?"POOR":"FAIR";
+  const tfScores={};
+  tfScores["⚡ Intraday"]=Math.max(5,Math.min(95,(Math.max(0,(volume-1.5)*35)+(shortInt>20&&volume>2?25:0)+(rsi>28&&rsi<52?12:0)+(catalystNews>0.5?20:0)+(macd>0.3?8:0)-(rsi>70?15:0))*volMod));
+  tfScores["📈 Short Swing"]=Math.max(5,Math.min(95,(macd>0?22:0)+(rsi<45&&rsi>25?20:0)+(volume>1.3?15:0)+(earningsBeat>10?18:0)+(priceVsMA50<-10?12:0)+(catalystNews>0?10:0)-(debtRatio>2?10:0)));
+  tfScores["🌊 Medium Swing"]=Math.max(5,Math.min(95,(sectorFlow>0.2?22:0)+(revGrowth>20?20:0)+(macd>0?14:0)+(volume>1.1?10:0)+(priceVsMA200<-15?15:0)+(insiderBuy>0.5?12:0)+(daysToEarnings<30?14:0)-(debtRatio>2?12:0)));
+  tfScores["🏔️ Position"]=Math.max(5,Math.min(95,(revGrowth>30?28:revGrowth>10?16:0)+(insiderBuy>0.65?22:0)+(debtRatio<1?18:debtRatio<2?8:0)+(sectorFlow>0.3?15:0)+(capTier>=2?10:0)));
+  tfScores["🌳 Long Term"]=Math.max(5,Math.min(95,(revGrowth>20?25:0)+(debtRatio<1.5?20:0)+(capTier>=3?22:capTier===2?12:0)+(insiderBuy>0.5?15:0)+(sectorFlow>0?10:0)));
+  const bestTF=Object.entries(tfScores).sort((a,b)=>b[1]-a[1])[0][0];
+  return{score:Math.round(score),risk,price:parseFloat(price.toFixed(4)),upsidePct:parseFloat(upsidePct.toFixed(1)),stopPct:parseFloat((stopPct*100).toFixed(1)),rrRatio,entryQ,tfScores,bestTF,livePrice:false,changePct:0,metrics:{rsi,macd,volume,sentiment,shortInt,revGrowth,debtRatio,daysToEarnings}};
+}
+function mergeLiveData(sig,liveData,asset){
+  const live=liveData?.[asset.ticker];
+  if(!live?.price) return sig;
+  const realPrice=live.currency==="GBX"?live.price/100:live.price;
+  const changeSign=live.change_pct>0?1:live.change_pct<0?-1:0;
+  return{...sig,price:parseFloat(realPrice.toFixed(4)),livePrice:true,marketState:live.market_state||"CLOSED",currency:live.currency||"USD",changePct:live.change_pct||0,metrics:{...sig.metrics,rsi:Math.max(10,Math.min(90,sig.metrics.rsi+(changeSign*8)))}};
+}
 
-async def rset(key: str, value: str, ttl: int = 0):
-    r = await get_redis()
-    if r:
-        try:
-            if ttl: await r.setex(key, ttl, value)
-            else: await r.set(key, value)
-            return
-        except: pass
+// ── HELPERS ───────────────────────────────────────────────────
+const fmtPct=(n,d=1)=>n===undefined?"—":`${n>0?"+":""}${parseFloat(n).toFixed(d)}%`;
+const pnlColor=v=>v>0?"#00e676":v<0?"#ff1744":"#888";
+const uid=()=>Math.random().toString(36).slice(2,9);
+const fmtMs=ms=>{if(ms<=0)return"expired";const h=Math.floor(ms/3600000),d=Math.floor(ms/86400000),w=Math.floor(d/7),mo=Math.floor(d/30);if(mo>=1)return`${mo}mo`;if(w>=1)return`${w}wk`;if(d>=1)return`${d}d`;return`${h}h`;};
+const Tag=({children,color="#888",small})=>(<span style={{fontSize:small?6:8,color,border:`1px solid ${color}44`,borderRadius:3,padding:small?"0 3px":"1px 5px",letterSpacing:1,whiteSpace:"nowrap"}}>{children}</span>);
+const Pill=({label,active,color="#00b0ff",onClick})=>(<button onClick={onClick} style={{background:active?"#12121e":"transparent",border:`1px solid ${active?color:"#1a1a2e"}`,borderRadius:20,padding:"3px 10px",color:active?color:"#2a2a45",fontSize:9,whiteSpace:"nowrap"}}>{label}</button>);
+const Stat=({label,value,color="#c0c0e0",sub})=>(<div style={{background:"#0a0a16",borderRadius:6,padding:"8px 10px",textAlign:"center"}}><div style={{fontSize:7,color:"#2a2a40",letterSpacing:2,marginBottom:2}}>{label}</div><div style={{fontSize:13,fontWeight:700,color,fontFamily:"monospace"}}>{value}</div>{sub&&<div style={{fontSize:7,color:"#3a3a50",marginTop:1}}>{sub}</div>}</div>);
+const Modal=({onClose,children,maxWidth=460})=>(<div style={{position:"fixed",inset:0,background:"#000000dd",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={onClose}><div onClick={e=>e.stopPropagation()} style={{background:"#06060f",borderRadius:12,maxWidth,width:"100%",maxHeight:"92vh",overflowY:"auto"}}>{children}</div></div>);
 
-async def rdel(key: str):
-    r = await get_redis()
-    if r:
-        try: await r.delete(key)
-        except: pass
+// ── ASSET PROFILE MODAL ───────────────────────────────────────
+function AssetProfileModal({asset,sig,fmtMoney,onClose}){
+  const[tab,setTab]=useState("overview");
+  const profile=ASSET_PROFILES[asset.ticker];
+  const R=RISK_CFG[sig.risk];
+  const tabs=["overview","pros","cons","positioning","learning"];
+  return(
+    <Modal onClose={onClose} maxWidth={560}>
+      <div style={{background:"#0a0a16",borderBottom:`1px solid ${R.color}44`,padding:"14px 16px",borderRadius:"12px 12px 0 0"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:"#dde0ff"}}>{asset.ticker} <span style={{fontSize:14,color:"#4a4a6a",fontWeight:400}}>{asset.name}</span></div>
+            <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
+              <Tag color={CAP_COLORS[asset.cap]}>{asset.cap} Cap</Tag>
+              <Tag color="#5a5a8a">{asset.sector}</Tag>
+              <Tag color="#3a3a6a">{asset.sub}</Tag>
+              <Tag color={R.color}>{R.label}</Tag>
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:18,fontWeight:700,fontFamily:"monospace",color:"#dde0ff"}}>{fmtMoney(sig.price)}</div>
+            {sig.changePct!==0&&<div style={{fontSize:10,color:pnlColor(sig.changePct),fontFamily:"monospace"}}>{fmtPct(sig.changePct)}</div>}
+            <button onClick={onClose} style={{background:"none",border:"none",color:"#444",fontSize:18,marginTop:4}}>×</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:2,marginTop:12,borderTop:"1px solid #1a1a2e",paddingTop:10}}>
+          {tabs.map(t=>(<button key={t} onClick={()=>setTab(t)} style={{background:"transparent",border:"none",borderBottom:`2px solid ${tab===t?"#00b0ff":"transparent"}`,padding:"4px 10px",color:tab===t?"#00b0ff":"#3a3a55",fontSize:9,letterSpacing:1,textTransform:"uppercase"}}>{t}</button>))}
+        </div>
+      </div>
+      <div style={{padding:"14px 16px"}}>
+        {!profile&&<div style={{color:"#3a3a55",fontSize:10,textAlign:"center",padding:20}}>Detailed profile coming soon for {asset.ticker}.<br/><br/>Sector: {asset.sector} · Sub: {asset.sub} · Volatility: {asset.vol}<br/><br/>Signal Score: {sig.score} · Best TF: {TF_PROFILES[sig.bestTF]?.icon} {sig.bestTF}</div>}
+        {profile&&tab==="overview"&&(<div className="fade"><p style={{fontSize:11,color:"#a0a0c0",lineHeight:1.8,marginBottom:14}}>{profile.overview}</p><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div style={{background:"#0a0a16",borderRadius:6,padding:10}}><div style={{fontSize:8,color:"#00e676",letterSpacing:2,marginBottom:6}}>STRENGTHS</div>{(profile.strengths||[]).map((s,i)=>(<div key={i} style={{fontSize:9,color:"#8a8aaa",padding:"3px 0",borderBottom:"1px solid #0e0e18",lineHeight:1.6}}>{s}</div>))}</div>
+          <div style={{background:"#0a0a16",borderRadius:6,padding:10}}><div style={{fontSize:8,color:"#ff6d00",letterSpacing:2,marginBottom:6}}>RISKS</div>{(profile.risks||[]).map((r,i)=>(<div key={i} style={{fontSize:9,color:"#8a8aaa",padding:"3px 0",borderBottom:"1px solid #0e0e18",lineHeight:1.6}}>{r}</div>))}</div>
+        </div></div>)}
+        {profile&&tab==="pros"&&(<div className="fade"><div style={{marginBottom:6,fontSize:8,color:"#00e676",letterSpacing:2}}>PROS & STRUCTURAL STRENGTHS</div>{(profile.pros||[]).map((p,i)=>(<div key={i} style={{display:"flex",gap:8,padding:"7px 0",borderBottom:"1px solid #0a0a14"}}><span style={{color:"#00e676",flexShrink:0,fontSize:11}}>✓</span><span style={{fontSize:10,color:"#a0a0c0",lineHeight:1.7}}>{p}</span></div>))}</div>)}
+        {profile&&tab==="cons"&&(<div className="fade"><div style={{marginBottom:6,fontSize:8,color:"#ff6d00",letterSpacing:2}}>CONS & RISKS</div>{(profile.cons||[]).map((c,i)=>(<div key={i} style={{display:"flex",gap:8,padding:"7px 0",borderBottom:"1px solid #0a0a14"}}><span style={{color:"#ff1744",flexShrink:0,fontSize:11}}>✗</span><span style={{fontSize:10,color:"#a0a0c0",lineHeight:1.7}}>{c}</span></div>))}</div>)}
+        {profile&&tab==="positioning"&&(<div className="fade"><div style={{background:"#0a0a16",borderRadius:6,padding:12,marginBottom:10}}><div style={{fontSize:8,color:"#00b0ff",letterSpacing:2,marginBottom:6}}>CURRENT MARKET POSITIONING</div><p style={{fontSize:10,color:"#a0a0c0",lineHeight:1.8}}>{profile.positioning}</p></div>
+          {(profile.sources||[]).length>0&&<div><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:6}}>CITED SOURCES</div>{profile.sources.map((s,i)=>(<div key={i} style={{fontSize:9,color:"#00b0ff",padding:"3px 0",wordBreak:"break-all"}}>{s}</div>))}</div>}</div>)}
+        {profile&&tab==="learning"&&(<div className="fade"><div style={{background:"#ffd60015",border:"1px solid #ffd60033",borderRadius:6,padding:12,marginBottom:10}}><div style={{fontSize:8,color:"#ffd600",letterSpacing:2,marginBottom:6}}>📚 LEARNING HOOK</div><p style={{fontSize:11,color:"#c0c0a0",lineHeight:1.8}}>{profile.learningHook}</p></div>
+          <div style={{background:"#0a0a16",borderRadius:6,padding:12}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:8}}>SIGNAL SUMMARY</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+              <Stat label="RSI" value={sig.metrics.rsi.toFixed(0)} color={sig.metrics.rsi<30?"#00e676":sig.metrics.rsi>70?"#ff1744":"#c0c0e0"}/>
+              <Stat label="VOLUME" value={sig.metrics.volume.toFixed(1)+"x"} color={sig.metrics.volume>1.5?"#00d4ff":"#c0c0e0"}/>
+              <Stat label="SCORE" value={sig.score} color={sig.score>0?"#00e676":sig.score<0?"#ff1744":"#ffd600"}/>
+            </div>
+          </div>
+        </div>)}
+      </div>
+    </Modal>
+  );
+}
 
+// ── WELCOME / AUTH PAGE ───────────────────────────────────────
+function WelcomePage({onAuth}){
+  const[mode,setMode]=useState("home");
+  const[form,setForm]=useState({name:"",email:"",password:""});
+  const[error,setError]=useState("");
+  const[loading,setLoading]=useState(false);
+  const set=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const submit=async()=>{
+    setError("");setLoading(true);
+    try{
+      if(mode==="signup"){
+        if(!form.name.trim())throw new Error("Name is required");
+        if(!form.email.includes("@"))throw new Error("Valid email required");
+        if(form.password.length<6)throw new Error("Password must be 6+ characters");
+        const j=await api("/api/auth/register",{method:"POST",body:JSON.stringify({name:form.name,email:form.email,password:form.password})});
+        localStorage.setItem("mb_token",j.token);onAuth(j.user);
+      }else{
+        const j=await api("/api/auth/login",{method:"POST",body:JSON.stringify({email:form.email,password:form.password})});
+        localStorage.setItem("mb_token",j.token);onAuth(j.user);
+      }
+    }catch(e){setError(e.message);}
+    setLoading(false);
+  };
+  if(mode==="home") return(
+    <div style={{minHeight:"100vh",background:"#03030a",display:"flex",flexDirection:"column",overflow:"auto"}}>
+      <div style={{padding:"16px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #0c0c18"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:4,color:"#dde0ff"}}>MARKET <span style={{color:"#00b0ff"}}>BRAIN</span></div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>setMode("login")} style={{background:"transparent",border:"1px solid #1a1a2e",borderRadius:6,padding:"7px 16px",color:"#8a8aaa",fontSize:10,letterSpacing:1}}>LOG IN</button>
+          <button onClick={()=>setMode("signup")} className="hero-btn" style={{background:"#00b0ff22",border:"1px solid #00b0ff",borderRadius:6,padding:"7px 16px",color:"#00b0ff",fontSize:10,letterSpacing:1}}>SIGN UP FREE</button>
+        </div>
+      </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 24px",textAlign:"center"}}>
+        <div style={{fontSize:11,color:"#00b0ff",letterSpacing:4,marginBottom:16,fontFamily:"monospace"}}>● LIVE YAHOO FINANCE · 260+ ASSETS · NO API KEY</div>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:64,fontWeight:900,lineHeight:1,marginBottom:16,letterSpacing:2}}>
+          <span style={{color:"#dde0ff"}}>TRADE SMARTER.</span><br/>
+          <span style={{background:"linear-gradient(90deg,#00b0ff,#00e676)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>WITHOUT THE RISK.</span>
+        </div>
+        <div style={{fontSize:13,color:"#5a5a7a",maxWidth:480,lineHeight:1.8,marginBottom:40}}>Market Brain gives you real-time signal analysis across 260+ assets — stocks, crypto, forex, metals, commodities and more. Practice virtual trading and track your accuracy.</div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap",justifyContent:"center",marginBottom:60}}>
+          <button onClick={()=>setMode("signup")} className="hero-btn" style={{background:"linear-gradient(135deg,#00b0ff,#0080cc)",border:"none",borderRadius:8,padding:"14px 32px",color:"#fff",fontSize:12,letterSpacing:2,fontWeight:700,boxShadow:"0 0 40px #00b0ff44"}}>GET STARTED FREE →</button>
+          <button onClick={()=>setMode("login")} className="hero-btn" style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:8,padding:"14px 32px",color:"#8a8aaa",fontSize:12,letterSpacing:2}}>I HAVE AN ACCOUNT</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,maxWidth:860,width:"100%"}}>
+          {[{icon:"📊",title:"260+ Assets",desc:"Stocks, crypto, forex, metals, commodities, REITs and more with live Yahoo Finance prices"},{icon:"🎯",title:"Signal Engine",desc:"Timeframe alignment scores for intraday, swing, position and long-term trading"},{icon:"💼",title:"Virtual Portfolio",desc:"Practice with a virtual budget. Place trades, track P&L, and close positions"},{icon:"★",title:"Timed Watchlist",desc:"Watch assets for set periods and score the engine's prediction accuracy"},{icon:"📈",title:"Accuracy Tracker",desc:"Win rate broken down by cap, sector, and timeframe"},{icon:"🛡️",title:"Asset Profiles",desc:"Deep-dive pros, cons, strengths, risks and market positioning for every asset"},].map(f=>(<div key={f.title} style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:"16px",textAlign:"left"}}><div style={{fontSize:24,marginBottom:8}}>{f.icon}</div><div style={{fontSize:12,fontWeight:700,color:"#dde0ff",marginBottom:4}}>{f.title}</div><div style={{fontSize:10,color:"#4a4a6a",lineHeight:1.7}}>{f.desc}</div></div>))}
+        </div>
+      </div>
+      <div style={{padding:"16px",textAlign:"center",fontSize:8,color:"#1a1a28",borderTop:"1px solid #0c0c18"}}>Market Brain · Virtual simulation only · Not financial advice</div>
+    </div>
+  );
+  const isSignup=mode==="signup";
+  return(
+    <div style={{minHeight:"100vh",background:"#03030a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{width:"100%",maxWidth:400,animation:"fadeIn 0.3s ease"}}>
+        <div style={{textAlign:"center",marginBottom:32}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:900,letterSpacing:4,color:"#dde0ff",marginBottom:4}}>MARKET <span style={{color:"#00b0ff"}}>BRAIN</span></div><div style={{fontSize:11,color:"#4a4a6a"}}>{isSignup?"Create your free account":"Welcome back"}</div></div>
+        <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:12,padding:28,animation:"glow 3s infinite"}}>
+          {isSignup&&(<div style={{marginBottom:14}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>YOUR NAME</div><input value={form.name} onChange={set("name")} placeholder="John Smith" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}/></div>)}
+          <div style={{marginBottom:14}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>EMAIL</div><input value={form.email} onChange={set("email")} placeholder="you@example.com" type="email" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}/></div>
+          <div style={{marginBottom:20}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>PASSWORD</div><input value={form.password} onChange={set("password")} placeholder={isSignup?"At least 6 characters":"Your password"} type="password" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+          {error&&<div style={{background:"#ff174420",border:"1px solid #ff174444",borderRadius:6,padding:"8px 12px",fontSize:10,color:"#ff6a6a",marginBottom:14}}>{error}</div>}
+          <button onClick={submit} disabled={loading} style={{width:"100%",background:loading?"#1a1a2e":"linear-gradient(135deg,#00b0ff,#0080cc)",border:"none",borderRadius:8,padding:"12px",color:loading?"#3a3a50":"#fff",fontSize:11,letterSpacing:2,fontWeight:700}}>{loading?"LOADING...":(isSignup?"CREATE ACCOUNT":"LOG IN")}</button>
+          <div style={{textAlign:"center",marginTop:16,fontSize:9,color:"#4a4a6a"}}>{isSignup?"Already have an account? ":"Don't have an account? "}<span onClick={()=>{setMode(isSignup?"login":"signup");setError("");}} style={{color:"#00b0ff",cursor:"pointer"}}>{isSignup?"Log in":"Sign up free"}</span></div>
+        </div>
+        <button onClick={()=>setMode("home")} style={{display:"block",margin:"16px auto 0",background:"none",border:"none",color:"#3a3a55",fontSize:9}}>← Back to home</button>
+      </div>
+    </div>
+  );
+}
 
-# ── Auth helpers ──────────────────────────────────────────────
-def hash_password(password: str) -> str:
-    salt = os.urandom(16)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
-    return base64.b64encode(salt + key).decode()
+// ── TRADE MODAL ───────────────────────────────────────────────
+function TradeModal({asset,sig,balance,fmtMoney,toLocal,onPlace,onClose}){
+  const R=RISK_CFG[sig.risk];
+  const[shares,setShares]=useState("");
+  const[tf,setTf]=useState(sig.bestTF);
+  const[stopPct,setStopPct]=useState(sig.stopPct);
+  const[targetPct,setTargetPct]=useState(sig.upsidePct);
+  const priceLocal=toLocal(sig.price);
+  const sym=fmtMoney(sig.price).replace(/[\d.,]/g,"").trim()||"$";
+  const sharesN=parseFloat(shares)||0;
+  const totalCost=sharesN*priceLocal;
+  const rr=parseFloat(stopPct)>0?(parseFloat(targetPct)/parseFloat(stopPct)).toFixed(1):"—";
+  const rrOk=parseFloat(rr)>=2;
+  const pctBal=balance>0?(totalCost/balance)*100:0;
+  const risk2=balance*0.02;
+  const suggested=parseFloat(stopPct)>0&&priceLocal>0?Math.floor(risk2/(priceLocal*parseFloat(stopPct)/100)):0;
+  const canPlace=sharesN>0&&totalCost<=balance;
+  return(
+    <Modal onClose={onClose} maxWidth={480}>
+      <div style={{background:"#0a0a16",borderBottom:`1px solid ${R.color}44`,padding:"14px 16px",borderRadius:"12px 12px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2}}>VIRTUAL TRADE</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#dde0ff"}}>{asset.ticker}</div></div>
+        <div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:"#dde0ff"}}>{fmtMoney(sig.price)}</div><Tag color={R.color}>{R.label}</Tag></div>
+      </div>
+      <div style={{padding:"14px 16px"}}>
+        <div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:6}}>TIMEFRAME</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:14}}>
+          {TF_KEYS.map(k=>{const p=TF_PROFILES[k],sc=sig.tfScores[k];const pc=sc>=72?"#00e676":sc>=52?"#00d4ff":sc>=35?"#ffd600":"#ff6d00";const isA=tf===k;return(<div key={k} onClick={()=>setTf(k)} style={{background:isA?p.color+"22":"#0a0a16",border:`1px solid ${isA?p.color:"#1a1a2e"}`,borderRadius:6,padding:"8px",cursor:"pointer",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,color:isA?p.color:"#5a5a7a",fontWeight:700}}>{p.icon} {p.short}</span><span style={{fontSize:9,color:pc,fontWeight:700}}>{sc.toFixed(0)}%</span></div>);})}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          {[["STOP LOSS %",stopPct,setStopPct],["TARGET %",targetPct,setTargetPct]].map(([l,v,set])=>(<div key={l}><div style={{fontSize:8,color:"#2a2a40",marginBottom:4}}>{l}</div><input value={v} onChange={e=>set(e.target.value)} style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"6px 8px",color:"#c0c0e0",fontSize:12}}/></div>))}
+        </div>
+        <div style={{marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:8,color:"#2a2a40"}}>QUANTITY</span><button onClick={()=>setShares(suggested.toString())} style={{fontSize:8,color:"#00b0ff",background:"none",border:"none"}}>Use 2% rule ({suggested})</button></div>
+          <input value={shares} onChange={e=>setShares(e.target.value)} placeholder="Enter quantity" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"7px 10px",color:"#c0c0e0",fontSize:13}}/>
+        </div>
+        <div style={{background:"#0a0a16",borderRadius:7,padding:10,marginBottom:12}}>
+          {[["Balance",`${sym}${balance.toFixed(2)}`,"#c0c0e0"],["Total Cost",sharesN>0?`${sym}${totalCost.toFixed(2)}`:"—",pctBal>30?"#ff6d00":"#c0c0e0"],["% of Account",sharesN>0?`${pctBal.toFixed(1)}%`:"—",pctBal>30?"#ff6d00":"#c0c0e0"],["R/R",`${rr}:1`,rrOk?"#00e676":"#ffd600"],["Max Loss",sharesN>0?`-${sym}${(totalCost*parseFloat(stopPct)/100).toFixed(2)}`:"—","#ff1744"],["Max Gain",sharesN>0?`+${sym}${(totalCost*parseFloat(targetPct)/100).toFixed(2)}`:"—","#00e676"]].map(([l,v,c])=>(<div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #0e0e18",fontSize:10}}><span style={{color:"#4a4a6a"}}>{l}</span><span style={{color:c,fontWeight:700,fontFamily:"monospace"}}>{v}</span></div>))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <button onClick={onClose} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:6,padding:"10px",color:"#4a4a6a",fontSize:9}}>CANCEL</button>
+          <button onClick={()=>{if(!canPlace)return;onPlace({id:uid(),ticker:asset.ticker,name:asset.name,sector:asset.sector,cap:asset.cap,timeframe:tf,tfScore:sig.tfScores[tf],entryPrice:priceLocal,shares:sharesN,totalCost:parseFloat(totalCost.toFixed(2)),stopPct:parseFloat(stopPct),targetPct:parseFloat(targetPct),signalScore:sig.score,signalRisk:sig.risk,rr:parseFloat(rr),entryQ:sig.entryQ,openedAt:Date.now(),status:"open"});onClose();}} disabled={!canPlace}
+            style={{background:canPlace?R.color+"22":"#1a1a2e",border:`1px solid ${canPlace?R.color:"#2a2a40"}`,borderRadius:6,padding:"10px",color:canPlace?R.color:"#3a3a50",fontSize:9,letterSpacing:1}}>PLACE TRADE</button>
+        </div>
+        <div style={{fontSize:7,color:"#1a1a28",textAlign:"center",marginTop:8}}>Virtual simulation only. Not financial advice.</div>
+      </div>
+    </Modal>
+  );
+}
 
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        data = base64.b64decode(stored.encode())
-        salt, key = data[:16], data[16:]
-        new_key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
-        return hmac.compare_digest(key, new_key)
-    except:
-        return False
+// ── WATCH MODAL ───────────────────────────────────────────────
+function WatchModal({asset,sig,fmtMoney,existingWatches,onAdd,onClose}){
+  const[dur,setDur]=useState(WATCH_DURATIONS[0]);
+  const tfP=TF_PROFILES[dur.tf],tfScore=sig.tfScores[dur.tf];
+  const s=asset.ticker.split("").reduce((a,c)=>a+c.charCodeAt(0),0);
+  const bullBias=(sig.score/100)*0.6+(tfScore/100-0.5)*0.4;
+  const volF={Low:0.003,Med:0.006,High:0.012,VHigh:0.018,Extreme:0.025}[asset.vol]||0.01;
+  let predPrice=sig.price;
+  for(let i=0;i<Math.max(1,Math.round(TF_PROFILES[dur.tf].simDays));i++){const rand=sr(s+i*17+99,-1,1);predPrice=predPrice*(1+bullBias*volF*0.5+rand*volF);}
+  const predChg=((predPrice-sig.price)/sig.price)*100;
+  const predColor=predChg>0?"#00e676":"#ff1744";
+  const alreadyWatching=existingWatches.filter(w=>w.status==="watching");
+  return(
+    <Modal onClose={onClose} maxWidth={440}>
+      <div style={{background:"#0a0a16",borderBottom:"1px solid #ffd60033",padding:"14px 16px",borderRadius:"12px 12px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2}}>ADD TO WATCHLIST</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#dde0ff"}}>{asset.ticker}</div>
+          {alreadyWatching.length>0&&<div style={{fontSize:8,color:"#ffd600",marginTop:2}}>Already watching over {alreadyWatching.length} period{alreadyWatching.length>1?"s":""} — you can add another</div>}
+        </div>
+        <div style={{fontFamily:"monospace",fontSize:15,fontWeight:700,color:"#dde0ff"}}>{fmtMoney(sig.price)}</div>
+      </div>
+      <div style={{padding:"14px 16px"}}>
+        <div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:8}}>WATCH DURATION</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:14}}>
+          {WATCH_DURATIONS.map(d=>{const isA=dur.label===d.label;const p=TF_PROFILES[d.tf];const alreadyThis=alreadyWatching.some(w=>w.duration===d.label);return(<div key={d.label} onClick={()=>setDur(d)} style={{background:isA?p.color+"22":"#0a0a16",border:`1px solid ${isA?p.color:alreadyThis?"#ffd60033":"#1a1a2e"}`,borderRadius:6,padding:"8px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:10,color:isA?p.color:"#6a6a8a",fontWeight:700}}>{d.label}</span><div style={{display:"flex",gap:3,alignItems:"center"}}>{alreadyThis&&<Tag color="#ffd600" small>★</Tag>}<Tag color={p.color} small>{p.icon}</Tag></div></div>);})}
+        </div>
+        <div style={{background:predColor+"10",border:`1px solid ${predColor}33`,borderRadius:8,padding:14,marginBottom:14}}>
+          <div style={{fontSize:8,color:predColor,letterSpacing:2,marginBottom:8}}>ENGINE PROJECTION</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
+            <div><div style={{fontSize:7,color:"#2a2a40",marginBottom:2}}>NOW</div><div style={{fontSize:12,fontWeight:700,fontFamily:"monospace",color:"#c0c0e0"}}>{fmtMoney(sig.price)}</div></div>
+            <div><div style={{fontSize:7,color:"#2a2a40",marginBottom:2}}>PROJECTED</div><div style={{fontSize:12,fontWeight:700,fontFamily:"monospace",color:predColor}}>{fmtMoney(predPrice)}</div></div>
+            <div><div style={{fontSize:7,color:"#2a2a40",marginBottom:2}}>MOVE</div><div style={{fontSize:12,fontWeight:700,fontFamily:"monospace",color:predColor}}>{fmtPct(predChg)}</div></div>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <button onClick={onClose} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:6,padding:"10px",color:"#4a4a6a",fontSize:9}}>CANCEL</button>
+          <button onClick={()=>{onAdd({id:uid(),ticker:asset.ticker,name:asset.name,sector:asset.sector,cap:asset.cap,duration:dur.label,timeframe:dur.tf,tfScore,addedAt:Date.now(),expiresAt:Date.now()+dur.ms,entryPrice:sig.price,predictedPrice:parseFloat(predPrice.toFixed(4)),predictedChg:parseFloat(predChg.toFixed(2)),signalScore:sig.score,signalRisk:sig.risk,status:"watching"});onClose();}}
+            style={{background:"#ffd60022",border:"1px solid #ffd600",borderRadius:6,padding:"10px",color:"#ffd600",fontSize:9,letterSpacing:1}}>START WATCHING</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
-def make_token(email: str) -> str:
-    raw = f"{email}:{time.time()}:{os.urandom(16).hex()}"
-    return base64.b64encode(raw.encode()).decode().replace("=", "")
+// ── ACCURACY ENGINE ───────────────────────────────────────────
+function calcAccuracy(trades,watchItems){
+  const closed=[...trades.filter(t=>t.status!=="open"),...watchItems.filter(w=>w.status==="expired")];
+  if(!closed.length) return null;
+  const score=item=>item.finalPnLPct!==undefined?item.finalPnLPct:(item.actualChg||0);
+  const wins=closed.filter(t=>score(t)>0).length;
+  const byCap={};CAPS.filter(c=>c!=="All").forEach(cap=>{const items=closed.filter(t=>t.cap===cap);if(items.length){const w=items.filter(t=>score(t)>0).length;byCap[cap]={wins:w,total:items.length,rate:(w/items.length)*100};}});
+  const bySector={};[...new Set(closed.map(t=>t.sector))].forEach(sec=>{const items=closed.filter(t=>t.sector===sec);if(items.length){const w=items.filter(t=>score(t)>0).length;bySector[sec]={wins:w,total:items.length,rate:(w/items.length)*100};}});
+  return{overall:(wins/closed.length)*100,wins,total:closed.length,losses:closed.length-wins,avgReturn:closed.reduce((a,t)=>a+score(t),0)/closed.length,byCap,bySector};
+}
 
-async def save_user(email: str, user: dict):
-    await rset(f"user:{email}", json.dumps(user))
-    _memory_users[email] = user
+// ── ADMIN DASHBOARD ───────────────────────────────────────────
+function AdminDashboard({user,onBack}){
+  const[adminView,setAdminView]=useState("overview");
+  const[analytics,setAnalytics]=useState(null);
+  const[users,setUsers]=useState([]);
+  const[codes,setCodes]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[selectedUser,setSelectedUser]=useState(null);
+  const[userPortfolio,setUserPortfolio]=useState(null);
+  const[newCode,setNewCode]=useState({type:"percent",value:10,max_uses:0,description:"",custom_code:""});
+  const[codeMsg,setCodeMsg]=useState("");
+  const isSuperAdmin=user.role==="super_admin";
 
-async def load_user(email: str) -> Optional[dict]:
-    val = await rget(f"user:{email}")
-    if val: return json.loads(val)
-    return _memory_users.get(email)
+  useEffect(()=>{
+    Promise.all([
+      api("/api/admin/analytics").then(setAnalytics),
+      api("/api/admin/users").then(r=>setUsers(r.users||[])),
+      api("/api/admin/discount-codes").then(r=>setCodes(r.codes||[])),
+    ]).catch(()=>{}).finally(()=>setLoading(false));
+  },[]);
 
-async def save_token(token: str, email: str):
-    await rset(f"token:{token}", email, TOKEN_TTL)
-    _memory_tokens[token] = email
+  const loadUserPortfolio=async(email)=>{
+    try{const r=await api(`/api/admin/users/${encodeURIComponent(email)}/portfolio`);setUserPortfolio(r);}catch(e){}
+  };
 
-async def load_token(token: str) -> Optional[str]:
-    val = await rget(f"token:{token}")
-    if val: return val
-    return _memory_tokens.get(token)
+  const createCode=async()=>{
+    try{
+      const r=await api("/api/admin/discount-codes",{method:"POST",body:JSON.stringify({...newCode,value:parseFloat(newCode.value),max_uses:parseInt(newCode.max_uses)||0})});
+      setCodes(p=>[...p,r]);setCodeMsg("✓ Code created: "+r.code);
+      setNewCode({type:"percent",value:10,max_uses:0,description:"",custom_code:""});
+    }catch(e){setCodeMsg("✗ "+e.message);}
+  };
 
-async def delete_token(token: str):
-    await rdel(f"token:{token}")
-    _memory_tokens.pop(token, None)
+  const deleteCode=async(id)=>{
+    try{await api(`/api/admin/discount-codes/${id}`,{method:"DELETE"});setCodes(p=>p.filter(c=>c.id!==id));}catch(e){}
+  };
 
-async def save_portfolio(email: str, portfolio: dict):
-    await rset(f"portfolio:{email}", json.dumps(portfolio))
-    _memory_portfolios[email] = portfolio
+  const toggleCode=async(code)=>{
+    try{const r=await api(`/api/admin/discount-codes/${code.id}`,{method:"PATCH",body:JSON.stringify({disabled:!code.disabled})});setCodes(p=>p.map(c=>c.id===code.id?r:c));}catch(e){}
+  };
 
-async def load_portfolio(email: str) -> dict:
-    val = await rget(f"portfolio:{email}")
-    if val: return json.loads(val)
-    if email in _memory_portfolios: return _memory_portfolios[email]
-    return {"trades": [], "watchItems": [], "balance": 1000, "startBalance": 1000}
+  const navItems=[
+    {id:"overview",label:"📊 Overview",admin:true},
+    {id:"users",label:"👥 Users",admin:true},
+    {id:"analytics",label:"📈 Analytics",admin:true},
+    {id:"codes",label:"🏷️ Discount Codes",admin:true},
+    {id:"assets",label:"🗂️ Asset Manager",admin:true},
+    {id:"config",label:"⚙️ System Config",admin:false,superOnly:true},
+  ].filter(n=>!n.superOnly||isSuperAdmin);
 
-async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Not authenticated")
-    token = authorization[7:]
-    email = await load_token(token)
-    if not email:
-        raise HTTPException(401, "Invalid or expired token")
-    user = await load_user(email)
-    if not user:
-        raise HTTPException(401, "User not found")
-    return user
+  if(loading) return(<div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:32,height:32,border:"3px solid #1a1a2e",borderTop:"3px solid #ff6d00",borderRadius:"50%",animation:"spin 1s linear infinite"}}/></div>);
 
+  return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden",background:"#030309"}}>
+      {/* Admin Header */}
+      <div style={{borderBottom:"1px solid #1a0a00",padding:"8px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,background:"#060309"}}>
+        <button onClick={onBack} style={{background:"transparent",border:"1px solid #2a1a00",borderRadius:5,padding:"5px 10px",color:"#ff6d00",fontSize:9}}>← BACK</button>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:900,letterSpacing:3,color:"#dde0ff"}}>ADMIN <span style={{color:"#ff6d00"}}>CONTROL PANEL</span></div>
+        <div style={{marginLeft:4}}>{isSuperAdmin?<Tag color="#ff6d00">SUPER ADMIN</Tag>:<Tag color="#ffd600">ADMIN</Tag>}</div>
+        <div style={{marginLeft:"auto",fontSize:9,color:"#3a2a10"}}>{user.name} · {user.email}</div>
+      </div>
+      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {/* Sidebar */}
+        <div style={{width:160,borderRight:"1px solid #1a0a00",background:"#050308",display:"flex",flexDirection:"column",flexShrink:0,padding:8,gap:3,overflowY:"auto"}}>
+          {navItems.map(n=>(<button key={n.id} onClick={()=>setAdminView(n.id)} style={{background:adminView===n.id?"#ff6d0018":"transparent",border:`1px solid ${adminView===n.id?"#ff6d0044":"transparent"}`,borderRadius:6,padding:"9px 10px",color:adminView===n.id?"#ff6d00":"#3a3a55",fontSize:9,textAlign:"left",letterSpacing:0.5}}>{n.label}</button>))}
+        </div>
+        {/* Content */}
+        <div style={{flex:1,overflowY:"auto",padding:14}}>
 
-# ── Lifespan ──────────────────────────────────────────────────
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await get_redis()
-    Path("static").mkdir(exist_ok=True)
-    yield
-    if redis_client:
-        await redis_client.aclose()
+          {/* OVERVIEW */}
+          {adminView==="overview"&&analytics&&(<div className="fade">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#ff6d00",letterSpacing:2,marginBottom:12}}>SYSTEM OVERVIEW</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:16}}>
+              {[["TOTAL USERS",analytics.overview.total_users,"#00b0ff"],["TOTAL TRADES",analytics.overview.total_trades,"#ffd600"],["TOTAL WATCHES",analytics.overview.total_watches,"#ffd600"],["TRADE WIN RATE",analytics.global_trades.win_rate+"%",analytics.global_trades.win_rate>=60?"#00e676":"#ff6d00"],["WATCH HIT RATE",analytics.global_watches.hit_rate+"%",analytics.global_watches.hit_rate>=60?"#00e676":"#ff6d00"]].map(([l,v,c])=>(<Stat key={l} label={l} value={v} color={c}/>))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                <div style={{fontSize:9,color:"#ff6d00",letterSpacing:2,marginBottom:10}}>TRADES — GLOBAL STATS</div>
+                {[["Closed Trades",analytics.global_trades.count],["Win Rate",analytics.global_trades.win_rate+"%"],["Avg Return",fmtPct(analytics.global_trades.avg_pnl_pct)]].map(([l,v])=>(<div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0a0a14",fontSize:10}}><span style={{color:"#4a4a6a"}}>{l}</span><span style={{color:"#c0c0e0",fontFamily:"monospace",fontWeight:700}}>{v}</span></div>))}
+              </div>
+              <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                <div style={{fontSize:9,color:"#ffd600",letterSpacing:2,marginBottom:10}}>WATCHES — GLOBAL STATS</div>
+                {[["Expired Watches",analytics.global_watches.count],["Hit Rate",analytics.global_watches.hit_rate+"%"],["Avg Move",fmtPct(analytics.global_watches.avg_chg)]].map(([l,v])=>(<div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0a0a14",fontSize:10}}><span style={{color:"#4a4a6a"}}>{l}</span><span style={{color:"#c0c0e0",fontFamily:"monospace",fontWeight:700}}>{v}</span></div>))}
+              </div>
+            </div>
+          </div>)}
 
+          {/* USERS */}
+          {adminView==="users"&&(<div className="fade">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#ff6d00",letterSpacing:2,marginBottom:12}}>USER ANALYTICS ({users.length})</div>
+            {selectedUser&&userPortfolio&&(<div style={{background:"#07070f",border:"1px solid #ff6d0044",borderRadius:8,padding:12,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:"#dde0ff"}}>{selectedUser.name} <span style={{fontSize:10,color:"#4a4a6a"}}>({selectedUser.email})</span></div><button onClick={()=>{setSelectedUser(null);setUserPortfolio(null);}} style={{background:"none",border:"none",color:"#444",fontSize:14}}>×</button></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:8}}>
+                {[["WIN RATE",selectedUser.win_rate+"%",selectedUser.win_rate>=60?"#00e676":"#ff6d00"],["WATCH ACC",selectedUser.watch_accuracy+"%",selectedUser.watch_accuracy>=60?"#00e676":"#ff6d00"],["TOTAL P&L","$"+selectedUser.total_pnl.toFixed(2),pnlColor(selectedUser.total_pnl)],["TRADES",selectedUser.trade_count,"#c0c0e0"],["WATCHES",selectedUser.watch_count,"#c0c0e0"]].map(([l,v,c])=>(<Stat key={l} label={l} value={v} color={c}/>))}
+              </div>
+              <div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:6}}>RECENT TRADES</div>
+              {(userPortfolio.portfolio?.trades||[]).slice(-5).reverse().map(t=>(<div key={t.id} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #0a0a14",fontSize:9}}><span style={{color:"#8a8aaa"}}>{t.ticker} · {t.status}</span><span style={{color:pnlColor(t.finalPnLPct||0),fontFamily:"monospace"}}>{t.finalPnLPct!==undefined?fmtPct(t.finalPnLPct):"open"}</span></div>))}
+            </div>)}
+            <div style={{display:"grid",gap:5}}>
+              {users.map(u=>(<div key={u.email} onClick={()=>{setSelectedUser(u);loadUserPortfolio(u.email);}} style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:7,padding:"10px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} className="card-hover">
+                <div><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}><span style={{fontSize:11,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{u.name}</span><Tag color={u.role==="super_admin"?"#ff6d00":u.role==="admin"?"#ffd600":"#3a3a55"}>{u.role||"user"}</Tag></div><div style={{fontSize:8,color:"#3a3a50"}}>{u.email} · Joined {new Date(u.created_at*1000).toLocaleDateString()}</div></div>
+                <div style={{display:"flex",gap:10,textAlign:"right"}}>
+                  {[["WIN",u.win_rate+"%",u.win_rate>=60?"#00e676":"#ff6d00"],["W.ACC",u.watch_accuracy+"%",u.watch_accuracy>=60?"#00e676":"#ff6d00"],["P&L","$"+u.total_pnl.toFixed(0),pnlColor(u.total_pnl)],["TRADES",u.trade_count,"#c0c0e0"]].map(([l,v,c])=>(<div key={l}><div style={{fontSize:6,color:"#2a2a40",letterSpacing:1}}>{l}</div><div style={{fontSize:10,color:c,fontWeight:700,fontFamily:"monospace"}}>{v}</div></div>))}
+                </div>
+              </div>))}
+            </div>
+          </div>)}
 
-# ── App ───────────────────────────────────────────────────────
-app = FastAPI(title="Market Brain API", version="2.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+          {/* ANALYTICS */}
+          {adminView==="analytics"&&analytics&&(<div className="fade">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#ff6d00",letterSpacing:2,marginBottom:12}}>SYSTEM ANALYTICS</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                <div style={{fontSize:9,color:"#ff6d00",letterSpacing:2,marginBottom:10}}>BY SECTOR</div>
+                {Object.entries(analytics.by_sector).map(([s,d])=>{const r=d.trades.win_rate||d.watches.hit_rate;const c=r>=60?"#00e676":r>=40?"#ffd600":"#ff6d00";return(<div key={s} style={{padding:"5px 0",borderBottom:"1px solid #0a0a14"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:9,color:"#8a8aaa"}}>{s}</span><div style={{display:"flex",gap:10}}><span style={{fontSize:9,color:c,fontFamily:"monospace"}}>T:{d.trades.win_rate}%</span><span style={{fontSize:9,color:c,fontFamily:"monospace"}}>W:{d.watches.hit_rate}%</span></div></div></div>);})}
+              </div>
+              <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                <div style={{fontSize:9,color:"#ffd600",letterSpacing:2,marginBottom:10}}>BY CAP SIZE</div>
+                {Object.entries(analytics.by_cap).filter(([,d])=>d.trades.count>0||d.watches.count>0).map(([c,d])=>{const r=d.trades.win_rate||d.watches.hit_rate;const col=r>=60?"#00e676":r>=40?"#ffd600":"#ff6d00";return(<div key={c} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0a0a14"}}><div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{width:7,height:7,background:CAP_COLORS[c],borderRadius:"50%",display:"inline-block"}}/><span style={{fontSize:9,color:"#8a8aaa"}}>{c}</span></div><div style={{display:"flex",gap:10}}><span style={{fontSize:9,color:col,fontFamily:"monospace"}}>T:{d.trades.win_rate}%</span><span style={{fontSize:9,color:col,fontFamily:"monospace"}}>W:{d.watches.hit_rate}%</span></div></div>);})}
+              </div>
+            </div>
+            <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+              <div style={{fontSize:9,color:"#00b0ff",letterSpacing:2,marginBottom:10}}>BY TIMEFRAME</div>
+              {Object.entries(analytics.by_timeframe).map(([tf,d])=>{const p=TF_PROFILES[tf];if(!p)return null;const r=d.trades.win_rate||d.watches.hit_rate;const c=r>=60?"#00e676":r>=40?"#ffd600":"#ff6d00";return(<div key={tf} style={{padding:"5px 0",borderBottom:"1px solid #0a0a14"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:9,color:p.color}}>{p.icon} {p.short}</span><div style={{display:"flex",gap:10}}><span style={{fontSize:9,color:c,fontFamily:"monospace"}}>T:{d.trades.win_rate}%</span><span style={{fontSize:9,color:c,fontFamily:"monospace"}}>W:{d.watches.hit_rate}%</span></div></div></div>);})}
+            </div>
+          </div>)}
 
+          {/* DISCOUNT CODES */}
+          {adminView==="codes"&&(<div className="fade">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#ff6d00",letterSpacing:2,marginBottom:12}}>DISCOUNT CODE MANAGER</div>
+            <div style={{background:"#07070f",border:"1px solid #ffd60033",borderRadius:8,padding:14,marginBottom:14}}>
+              <div style={{fontSize:9,color:"#ffd600",letterSpacing:2,marginBottom:10}}>CREATE NEW CODE</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                <div><div style={{fontSize:8,color:"#2a2a40",marginBottom:4}}>TYPE</div><select value={newCode.type} onChange={e=>setNewCode(p=>({...p,type:e.target.value}))} style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"6px",color:"#c0c0e0",fontSize:10}}><option value="percent">Percentage</option><option value="fixed">Fixed Amount</option></select></div>
+                <div><div style={{fontSize:8,color:"#2a2a40",marginBottom:4}}>VALUE</div><input value={newCode.value} onChange={e=>setNewCode(p=>({...p,value:e.target.value}))} style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"6px",color:"#c0c0e0",fontSize:12}}/></div>
+                <div><div style={{fontSize:8,color:"#2a2a40",marginBottom:4}}>MAX USES (0=∞)</div><input value={newCode.max_uses} onChange={e=>setNewCode(p=>({...p,max_uses:e.target.value}))} style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"6px",color:"#c0c0e0",fontSize:12}}/></div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div><div style={{fontSize:8,color:"#2a2a40",marginBottom:4}}>CUSTOM CODE (optional)</div><input value={newCode.custom_code} onChange={e=>setNewCode(p=>({...p,custom_code:e.target.value}))} placeholder="AUTO-GENERATED" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"6px",color:"#c0c0e0",fontSize:12}}/></div>
+                <div><div style={{fontSize:8,color:"#2a2a40",marginBottom:4}}>DESCRIPTION</div><input value={newCode.description} onChange={e=>setNewCode(p=>({...p,description:e.target.value}))} placeholder="e.g. Influencer campaign" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"6px",color:"#c0c0e0",fontSize:12}}/></div>
+              </div>
+              {codeMsg&&<div style={{fontSize:9,color:codeMsg.startsWith("✓")?"#00e676":"#ff6d00",marginBottom:8}}>{codeMsg}</div>}
+              <button onClick={createCode} style={{background:"#ffd60022",border:"1px solid #ffd600",borderRadius:6,padding:"8px 16px",color:"#ffd600",fontSize:9,letterSpacing:1}}>+ GENERATE CODE</button>
+            </div>
+            <div style={{display:"grid",gap:5}}>
+              {codes.map(c=>(<div key={c.id} style={{background:"#07070f",border:`1px solid ${c.disabled?"#2a2a40":"#1a1a2e"}`,borderRadius:7,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",opacity:c.disabled?0.5:1}}>
+                <div>
+                  <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"#ffd600",fontFamily:"monospace"}}>{c.code}</span>
+                    <Tag color={c.type==="percent"?"#00b0ff":"#00e676"}>{c.type==="percent"?c.value+"%":"$"+c.value} OFF</Tag>
+                    {c.disabled&&<Tag color="#ff1744">DISABLED</Tag>}
+                  </div>
+                  <div style={{fontSize:8,color:"#3a3a50"}}>{c.description||"No description"} · Uses: {c.uses}/{c.max_uses||"∞"} · Created by {c.created_by}</div>
+                </div>
+                <div style={{display:"flex",gap:5}}>
+                  <button onClick={()=>{navigator.clipboard.writeText(c.code);}} style={{background:"#00b0ff18",border:"1px solid #00b0ff44",borderRadius:5,padding:"4px 8px",color:"#00b0ff",fontSize:8}}>COPY</button>
+                  <button onClick={()=>toggleCode(c)} style={{background:c.disabled?"#00e67618":"#ff174418",border:`1px solid ${c.disabled?"#00e67644":"#ff174444"}`,borderRadius:5,padding:"4px 8px",color:c.disabled?"#00e676":"#ff6d00",fontSize:8}}>{c.disabled?"ENABLE":"DISABLE"}</button>
+                  <button onClick={()=>deleteCode(c.id)} style={{background:"#ff174418",border:"1px solid #ff174444",borderRadius:5,padding:"4px 8px",color:"#ff1744",fontSize:8}}>DELETE</button>
+                </div>
+              </div>))}
+              {codes.length===0&&<div style={{textAlign:"center",color:"#3a3a55",fontSize:10,padding:20}}>No discount codes yet. Create one above.</div>}
+            </div>
+          </div>)}
 
-# ── Pydantic models ───────────────────────────────────────────
-class RegisterRequest(BaseModel):
-    name: str
-    email: str
-    password: str
+          {/* ASSETS */}
+          {adminView==="assets"&&(<div className="fade">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#ff6d00",letterSpacing:2,marginBottom:12}}>ASSET MANAGER ({ASSETS.length} assets)</div>
+            <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14,marginBottom:14}}>
+              <div style={{fontSize:9,color:"#4a4a6a",letterSpacing:2,marginBottom:10}}>ASSET UNIVERSE SUMMARY</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
+                {Object.entries(ASSETS.reduce((acc,a)=>{acc[a.sector]=(acc[a.sector]||0)+1;return acc;},{})).sort((a,b)=>b[1]-a[1]).map(([s,n])=>(<div key={s} style={{background:"#0a0a16",borderRadius:5,padding:"6px 8px",textAlign:"center"}}><div style={{fontSize:8,color:"#3a3a50"}}>{s}</div><div style={{fontSize:12,color:"#00b0ff",fontWeight:700,fontFamily:"monospace"}}>{n}</div></div>))}
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:5}}>
+              {ASSETS.map(a=>(<div key={a.ticker} style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:6,padding:"8px 10px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:10,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{a.ticker}</span><Tag color={CAP_COLORS[a.cap]} small>{a.cap}</Tag></div>
+                <div style={{fontSize:8,color:"#3a3a50"}}>{a.name}</div>
+                <div style={{fontSize:7,color:"#2a2a40"}}>{a.sector} · {a.sub}</div>
+              </div>))}
+            </div>
+          </div>)}
 
-class LoginRequest(BaseModel):
-    email: str
-    password: str
+          {/* SYSTEM CONFIG */}
+          {adminView==="config"&&isSuperAdmin&&(<div className="fade">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#ff6d00",letterSpacing:2,marginBottom:12}}>SYSTEM CONFIGURATION <Tag color="#ff6d00">SUPER ADMIN ONLY</Tag></div>
+            <div style={{background:"#07070f",border:"1px solid #ff6d0033",borderRadius:8,padding:14}}>
+              <div style={{fontSize:9,color:"#ff6d00",letterSpacing:2,marginBottom:10}}>FEATURE FLAGS</div>
+              {[["virtual_trading","Virtual Trading","Enable/disable all virtual trading"],["watchlist","Watchlist","Enable/disable watchlist feature"],["live_prices","Live Prices","Toggle live Yahoo Finance pricing"],["admin_dashboard","Admin Dashboard","Show admin panel to admins"],["discount_codes","Discount Codes","Enable discount code system"]].map(([key,label,desc])=>(<div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #1a0a00"}}><div><div style={{fontSize:10,color:"#c0c0e0"}}>{label}</div><div style={{fontSize:8,color:"#3a3a50"}}>{desc}</div></div><Tag color="#00e676">ACTIVE</Tag></div>))}
+            </div>
+            <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14,marginTop:12}}>
+              <div style={{fontSize:9,color:"#2a2a40",letterSpacing:2,marginBottom:10}}>REGISTERED SUPER ADMIN</div>
+              <div style={{fontSize:11,color:"#ff6d00",fontFamily:"monospace"}}>mark_smalley@hotmail.co.uk</div>
+            </div>
+          </div>)}
 
-class PortfolioSave(BaseModel):
-    trades: list
-    watchItems: list
-    balance: float
-    startBalance: float
+        </div>
+      </div>
+    </div>
+  );
+}
 
+// ── MAIN APP ──────────────────────────────────────────────────
+function MainApp({user,onLogout}){
+  const[view,setView]=useState("market");
+  const[showAdmin,setShowAdmin]=useState(false);
+  const[allSigs,setAllSigs]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[liveCount,setLiveCount]=useState(0);
+  const[fxRates,setFxRates]=useState(null);
+  const[lastUpdated,setLastUpdated]=useState(null);
+  const[selected,setSelected]=useState(null);
+  // Filters
+  const[activeSector,setActiveSector]=useState("All");
+  const[activeCap,setActiveCap]=useState("All");
+  const[activeVol,setActiveVol]=useState("All");
+  const[activeRisk,setActiveRisk]=useState("All");
+  const[sortMode,setSortMode]=useState("bestTF");
+  const[searchQ,setSearchQ]=useState("");
+  const[showProfileModal,setShowProfileModal]=useState(false);
+  // Currency
+  const[activeCurrency,setActiveCurrency]=useState(CURRENCIES[0]);
+  const[showCurrModal,setShowCurrModal]=useState(false);
+  // Trade/Watch
+  const[showTradeModal,setShowTradeModal]=useState(false);
+  const[showWatchModal,setShowWatchModal]=useState(false);
+  const[trades,setTrades]=useState([]);
+  const[balance,setBalance]=useState(1000);
+  const[startBalance,setStartBalance]=useState(1000);
+  const[budgetInput,setBudgetInput]=useState("1000");
+  const[showBudget,setShowBudget]=useState(false);
+  const[watchItems,setWatchItems]=useState([]);
+  const[tick,setTick]=useState(0);
+  const[saving,setSaving]=useState(false);
+  // Portfolio filters
+  const[portfolioFilter,setPortfolioFilter]=useState("all");
+  const[portfolioSort,setPortfolioSort]=useState("date");
+  // Watchlist filters
+  const[watchFilter,setWatchFilter]=useState("all");
+  const[watchSort,setWatchSort]=useState("date");
 
-# ── Auth endpoints ────────────────────────────────────────────
-@app.post("/api/auth/register", tags=["Auth"])
-async def register(req: RegisterRequest):
-    email = req.email.lower().strip()
-    if len(req.password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
-    existing = await load_user(email)
-    if existing:
-        raise HTTPException(409, "Email already registered")
-    user = {
-        "name": req.name.strip(),
-        "email": email,
-        "password_hash": hash_password(req.password),
-        "created_at": int(time.time()),
-    }
-    await save_user(email, user)
-    token = make_token(email)
-    await save_token(token, email)
-    return {"token": token, "user": {"name": user["name"], "email": email}}
+  const isAdmin=user.role==="admin"||user.role==="super_admin";
 
-@app.post("/api/auth/login", tags=["Auth"])
-async def login(req: LoginRequest):
-    email = req.email.lower().strip()
-    user = await load_user(email)
-    if not user or not verify_password(req.password, user["password_hash"]):
-        raise HTTPException(401, "Invalid email or password")
-    token = make_token(email)
-    await save_token(token, email)
-    return {"token": token, "user": {"name": user["name"], "email": email}}
+  useEffect(()=>{const t=setInterval(()=>setTick(s=>s+1),10000);return()=>clearInterval(t);},[]);
 
-@app.post("/api/auth/logout", tags=["Auth"])
-async def logout(authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        await delete_token(authorization[7:])
-    return {"ok": True}
+  useEffect(()=>{
+    api("/api/portfolio").then(p=>{
+      if(p.trades) setTrades(p.trades);
+      if(p.watchItems) setWatchItems(p.watchItems);
+      if(p.balance!==undefined) setBalance(p.balance);
+      if(p.startBalance!==undefined) setStartBalance(p.startBalance);
+    }).catch(()=>{});
+  },[]);
 
-@app.get("/api/auth/me", tags=["Auth"])
-async def me(current_user: dict = Depends(get_current_user)):
-    return {"name": current_user["name"], "email": current_user["email"]}
+  const savePortfolio=useCallback(async(t,w,b,sb)=>{
+    setSaving(true);
+    try{await api("/api/portfolio",{method:"POST",body:JSON.stringify({trades:t,watchItems:w,balance:b,startBalance:sb})});}
+    catch(e){}
+    setSaving(false);
+  },[]);
 
+  useEffect(()=>{
+    const timer=setTimeout(()=>savePortfolio(trades,watchItems,balance,startBalance),2000);
+    return()=>clearTimeout(timer);
+  },[trades,watchItems,balance]);
 
-# ── Portfolio endpoints ───────────────────────────────────────
-@app.get("/api/portfolio", tags=["Portfolio"])
-async def get_portfolio(current_user: dict = Depends(get_current_user)):
-    return await load_portfolio(current_user["email"])
+  const toLocal=useCallback((usd)=>{
+    let rate;
+    if(fxRates?.USD&&fxRates[activeCurrency.code]!==undefined){rate=fxRates[activeCurrency.code]/fxRates.USD;}
+    else{rate=activeCurrency.fb/1.27;}
+    return parseFloat((usd*rate).toFixed(4));
+  },[fxRates,activeCurrency]);
+  const fmtMoney=useCallback((usd)=>{const v=toLocal(usd);return`${activeCurrency.symbol}${v.toFixed(v>1000?2:v>1?2:4)}`;},[toLocal,activeCurrency]);
 
-@app.post("/api/portfolio", tags=["Portfolio"])
-async def save_portfolio_endpoint(data: PortfolioSave, current_user: dict = Depends(get_current_user)):
-    await save_portfolio(current_user["email"], data.dict())
-    return {"ok": True}
+  const doRefresh=useCallback(async()=>{
+    const key=Date.now();const sigs={};
+    ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key);});
+    try{
+      const[liveData,liveFx]=await Promise.all([fetchLivePrices(ASSETS.map(a=>a.ticker)),fetchFxRates()]);
+      if(liveFx) setFxRates(liveFx);
+      if(liveData){let cnt=0;ASSETS.forEach(a=>{if(sigs[a.ticker]){const m=mergeLiveData(sigs[a.ticker],liveData,a);sigs[a.ticker]=m;if(m.livePrice)cnt++;}});setLiveCount(cnt);}
+    }catch(e){}
+    setAllSigs(sigs);setLastUpdated(new Date().toLocaleTimeString("en-GB"));setLoading(false);
+  },[]);
+  useEffect(()=>{doRefresh();},[]);
+  useEffect(()=>{const t=setInterval(doRefresh,30000);return()=>clearInterval(t);},[]);
 
+  useEffect(()=>{
+    setWatchItems(prev=>prev.map(w=>{
+      if(w.status==="watching"&&Date.now()>=w.expiresAt){
+        const actualPrice=allSigs[w.ticker]?.price||w.entryPrice;
+        const actualChg=((actualPrice-w.entryPrice)/w.entryPrice)*100;
+        return{...w,status:"expired",actualPrice,actualChg:parseFloat(actualChg.toFixed(2)),dirCorrect:(w.predictedChg>0&&actualChg>0)||(w.predictedChg<0&&actualChg<0),accuracy:Math.max(0,100-Math.abs(actualChg-w.predictedChg)*3)};
+      }
+      return w;
+    }));
+  },[tick,allSigs]);
 
-# ── Price cache ───────────────────────────────────────────────
-async def cache_get(key: str) -> Optional[dict]:
-    val = await rget(key)
-    if val: return json.loads(val)
-    entry = _memory_cache.get(key)
-    if entry and (time.time() - entry["_ts"]) < CACHE_TTL:
-        return entry["data"]
-    return None
+  const portfolioStats=useMemo(()=>{
+    let invested=0,currentVal=0;
+    trades.filter(t=>t.status==="open").forEach(t=>{const cp=allSigs[t.ticker]?toLocal(allSigs[t.ticker].price):t.entryPrice;invested+=t.totalCost;currentVal+=cp*t.shares;});
+    return{invested,currentVal,unrealised:currentVal-invested,openCount:trades.filter(t=>t.status==="open").length};
+  },[trades,allSigs,toLocal]);
 
-async def cache_set(key: str, data: dict):
-    await rset(f"cache:{key}", json.dumps(data), CACHE_TTL)
-    _memory_cache[key] = {"data": data, "_ts": time.time()}
+  const accuracy=useMemo(()=>calcAccuracy(trades,watchItems),[trades,watchItems]);
 
+  const placeTrade=useCallback((td)=>{setTrades(p=>[...p,td]);setBalance(p=>parseFloat((p-td.totalCost).toFixed(2)));},[]);
+  const closeTrade=useCallback((id)=>{
+    setTrades(p=>p.map(t=>{
+      if(t.id!==id) return t;
+      const cp=allSigs[t.ticker]?toLocal(allSigs[t.ticker].price):t.entryPrice;
+      const proceeds=cp*t.shares,pnl=proceeds-t.totalCost,pnlPct=(pnl/t.totalCost)*100;
+      setBalance(prev=>parseFloat((prev+proceeds).toFixed(2)));
+      return{...t,status:"closed",finalPrice:cp,finalPnL:parseFloat(pnl.toFixed(2)),finalPnLPct:parseFloat(pnlPct.toFixed(2)),closedAt:Date.now()};
+    }));
+  },[allSigs,toLocal]);
 
-# ── Yahoo Finance ─────────────────────────────────────────────
-_http_client: Optional[httpx.AsyncClient] = None
-_last_known: Dict[str, dict] = {}
+  const RISK_OPTIONS=["All","CRITICAL","HIGH","MODERATE","POSITIVE","STRONG"];
+  const VOL_OPTIONS=["All","Low","Med","High","VHigh","Extreme"];
 
-async def get_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
-            timeout=REQUEST_TIMEOUT,
-        )
-    return _http_client
+  const filtered=useMemo(()=>ASSETS.filter(a=>{
+    if(!allSigs[a.ticker]) return false;
+    if(activeSector!=="All"&&a.sector!==activeSector) return false;
+    if(activeCap!=="All"&&a.cap!==activeCap) return false;
+    if(activeVol!=="All"&&a.vol!==activeVol) return false;
+    if(activeRisk!=="All"&&allSigs[a.ticker].risk!==activeRisk) return false;
+    if(searchQ&&!a.ticker.toLowerCase().includes(searchQ.toLowerCase())&&!a.name.toLowerCase().includes(searchQ.toLowerCase())&&!a.sub.toLowerCase().includes(searchQ.toLowerCase())) return false;
+    return true;
+  }).sort((a,b)=>{
+    const sa=allSigs[a.ticker],sb=allSigs[b.ticker];
+    if(sortMode==="bestTF") return sb.tfScores[sb.bestTF]-sa.tfScores[sa.bestTF];
+    if(sortMode==="score") return sb.score-sa.score;
+    if(sortMode==="rr") return parseFloat(sb.rrRatio)-parseFloat(sa.rrRatio);
+    if(sortMode==="price_asc") return sa.price-sb.price;
+    if(sortMode==="price_desc") return sb.price-sa.price;
+    if(sortMode==="change") return(sb.changePct||0)-(sa.changePct||0);
+    if(sortMode==="change_neg") return(sa.changePct||0)-(sb.changePct||0);
+    if(sortMode==="vol_asc"){const o={Low:0,Med:1,High:2,VHigh:3,Extreme:4};return o[sa.vol]-o[sb.vol];}
+    if(sortMode==="vol_desc"){const o={Low:0,Med:1,High:2,VHigh:3,Extreme:4};return o[sb.vol]-o[sa.vol];}
+    return 0;
+  }),[allSigs,activeSector,activeCap,activeVol,activeRisk,searchQ,sortMode]);
 
-async def fetch_yahoo(symbol: str, client: httpx.AsyncClient) -> Optional[dict]:
-    for url in [YAHOO_URL.format(symbol=symbol), YAHOO_FALLBACK_URL.format(symbol=symbol)]:
-        try:
-            r = await client.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-            if r.status_code != 200: continue
-            data = r.json()
-            result = data.get("chart", {}).get("result", [])
-            if not result: continue
-            meta = result[0].get("meta", {})
-            price = meta.get("regularMarketPrice") or meta.get("previousClose")
-            if not price: continue
-            prev_close = meta.get("previousClose") or meta.get("chartPreviousClose") or price
-            change = price - prev_close
-            change_pct = (change / prev_close * 100) if prev_close else 0
-            market_state = meta.get("marketState", "CLOSED")
-            if market_state == "PRE": price = meta.get("preMarketPrice") or price
-            elif market_state == "POST": price = meta.get("postMarketPrice") or price
-            return {
-                "symbol": symbol, "price": round(float(price), 4),
-                "change": round(float(change), 4), "change_pct": round(float(change_pct), 4),
-                "prev_close": round(float(prev_close), 4),
-                "currency": meta.get("currency", "USD"), "market_state": market_state,
-                "exchange": meta.get("exchangeName", ""),
-                "name": meta.get("shortName") or meta.get("longName") or symbol,
-                "volume": meta.get("regularMarketVolume"),
-                "day_high": meta.get("regularMarketDayHigh"),
-                "day_low": meta.get("regularMarketDayLow"),
-                "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low": meta.get("fiftyTwoWeekLow"),
-                "timestamp": int(time.time()), "source": "yahoo_finance",
-            }
-        except httpx.TimeoutException: log.warning(f"Timeout: {symbol}")
-        except Exception as e: log.warning(f"Error {symbol}: {e}")
-    return None
+  const openTrades=trades.filter(t=>t.status==="open");
+  const closedTrades=trades.filter(t=>t.status!=="open");
+  const watchingCount=watchItems.filter(w=>w.status==="watching").length;
+  const sym=activeCurrency.symbol;
+  const totalPnL=balance-startBalance+portfolioStats.unrealised;
 
-async def get_price(symbol: str, client: httpx.AsyncClient) -> dict:
-    cached = await cache_get(f"price:{symbol}")
-    if cached: return {**cached, "cached": True}
-    data = await fetch_yahoo(symbol, client)
-    if data:
-        _last_known[symbol] = data
-        await cache_set(f"price:{symbol}", data)
-        return {**data, "cached": False}
-    if symbol in _last_known:
-        return {**_last_known[symbol], "stale": True, "cached": False}
-    return {"symbol": symbol, "price": None, "error": "Unavailable", "timestamp": int(time.time())}
+  // Portfolio filtered
+  const filteredTrades=useMemo(()=>{
+    let items=portfolioFilter==="open"?openTrades:portfolioFilter==="closed"?closedTrades:trades;
+    if(portfolioSort==="pnl_best") items=[...items].sort((a,b)=>(b.finalPnLPct||0)-(a.finalPnLPct||0));
+    if(portfolioSort==="pnl_worst") items=[...items].sort((a,b)=>(a.finalPnLPct||0)-(b.finalPnLPct||0));
+    if(portfolioSort==="date") items=[...items].sort((a,b)=>(b.openedAt||0)-(a.openedAt||0));
+    if(portfolioSort==="size") items=[...items].sort((a,b)=>(b.totalCost||0)-(a.totalCost||0));
+    return items;
+  },[trades,portfolioFilter,portfolioSort,openTrades,closedTrades]);
 
-def normalise_symbol(symbol: str) -> str:
-    symbol = symbol.upper().strip()
-    for prefix, suffix in [("LON:","\.L"),("EPA:",".PA"),("ETR:",".DE"),("AMS:",".AS"),("TSX:",".TO"),("ASX:",".AX")]:
-        if symbol.startswith(prefix): return symbol[len(prefix):] + suffix
-    return symbol
+  // Watch filtered
+  const filteredWatches=useMemo(()=>{
+    let items=watchFilter==="watching"?watchItems.filter(w=>w.status==="watching"):watchFilter==="expired"?watchItems.filter(w=>w.status==="expired"):watchItems;
+    if(watchSort==="accuracy_best") items=[...items].sort((a,b)=>(b.accuracy||0)-(a.accuracy||0));
+    if(watchSort==="accuracy_worst") items=[...items].sort((a,b)=>(a.accuracy||0)-(b.accuracy||0));
+    if(watchSort==="date") items=[...items].sort((a,b)=>(b.addedAt||0)-(a.addedAt||0));
+    if(watchSort==="expiry") items=[...items].sort((a,b)=>(a.expiresAt||0)-(b.expiresAt||0));
+    return items;
+  },[watchItems,watchFilter,watchSort]);
 
+  const selectStyle={background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:4,padding:"3px 6px",color:"#8a8aaa",fontSize:9};
 
-# ── Price endpoints ───────────────────────────────────────────
-@app.get("/health")
-async def health():
-    r = await get_redis()
-    return {"status": "healthy", "redis": "connected" if r else "memory", "timestamp": int(time.time())}
+  if(showAdmin) return(<AdminDashboard user={user} onBack={()=>setShowAdmin(false)}/>);
+  if(loading) return(<div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}><div style={{width:40,height:40,border:"3px solid #1a1a2e",borderTop:"3px solid #00b0ff",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{fontSize:11,color:"#3a3a55",letterSpacing:2}}>LOADING {ASSETS.length}+ ASSETS...</div></div>);
 
-@app.get("/api/price/{symbol}", tags=["Prices"])
-async def get_single_price(symbol: str):
-    return await get_price(normalise_symbol(symbol), await get_client())
+  return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      {/* MODALS */}
+      {showCurrModal&&(<Modal onClose={()=>setShowCurrModal(false)} maxWidth={340}>
+        <div style={{background:"#0a0a16",borderBottom:"1px solid #00b0ff33",padding:"14px 16px",borderRadius:"12px 12px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:17,fontWeight:700,color:"#dde0ff"}}>Select Currency</div>
+          <button onClick={()=>setShowCurrModal(false)} style={{background:"none",border:"none",color:"#444",fontSize:16}}>×</button>
+        </div>
+        <div style={{padding:8,maxHeight:380,overflowY:"auto"}}>
+          {CURRENCIES.map(c=>{const isA=c.code===activeCurrency.code;return(<div key={c.code} onClick={()=>{setActiveCurrency(c);setShowCurrModal(false);}} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:7,cursor:"pointer",background:isA?"#00b0ff18":"transparent",border:`1px solid ${isA?"#00b0ff44":"transparent"}`,marginBottom:3}}><span style={{fontSize:20}}>{c.flag}</span><div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:isA?"#00b0ff":"#dde0ff",fontFamily:"monospace"}}>{c.code} <span style={{color:"#4a4a6a",fontSize:10,fontFamily:"inherit"}}>{c.name}</span></div></div><span style={{fontSize:14,fontWeight:700,color:isA?"#00b0ff":"#6a6a8a",fontFamily:"monospace"}}>{c.symbol}</span>{isA&&<span style={{color:"#00b0ff"}}>✓</span>}</div>);})}
+        </div>
+      </Modal>)}
+      {showBudget&&(<Modal onClose={()=>setShowBudget(false)} maxWidth={320}>
+        <div style={{padding:20}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:17,fontWeight:700,color:"#dde0ff",marginBottom:6}}>SET VIRTUAL BUDGET</div>
+          <div style={{fontSize:9,color:"#3a3a55",marginBottom:12}}>Resets all trades and watchlist.</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:10}}>{["500","1000","5000","10000","25000","50000"].map(v=>(<button key={v} onClick={()=>setBudgetInput(v)} style={{background:budgetInput===v?"#00b0ff22":"#0a0a16",border:`1px solid ${budgetInput===v?"#00b0ff":"#1a1a2e"}`,borderRadius:5,padding:"4px 10px",color:budgetInput===v?"#00b0ff":"#5a5a7a",fontSize:9}}>{sym}{v}</button>))}</div>
+          <input value={budgetInput} onChange={e=>setBudgetInput(e.target.value)} style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:5,padding:"7px",color:"#c0c0e0",fontSize:13,marginBottom:12}}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <button onClick={()=>setShowBudget(false)} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:6,padding:"8px",color:"#4a4a6a",fontSize:9}}>CANCEL</button>
+            <button onClick={()=>{const v=parseFloat(budgetInput)||1000;setBalance(v);setStartBalance(v);setTrades([]);setWatchItems([]);setShowBudget(false);}} style={{background:"#00b0ff22",border:"1px solid #00b0ff",borderRadius:6,padding:"8px",color:"#00b0ff",fontSize:9}}>CONFIRM</button>
+          </div>
+        </div>
+      </Modal>)}
+      {showTradeModal&&selected&&allSigs[selected.ticker]&&(<TradeModal asset={selected} sig={allSigs[selected.ticker]} balance={balance} fmtMoney={fmtMoney} toLocal={toLocal} onPlace={placeTrade} onClose={()=>setShowTradeModal(false)}/>)}
+      {showWatchModal&&selected&&allSigs[selected.ticker]&&(<WatchModal asset={selected} sig={allSigs[selected.ticker]} fmtMoney={fmtMoney} existingWatches={watchItems.filter(w=>w.ticker===selected.ticker)} onAdd={w=>setWatchItems(p=>[...p,w])} onClose={()=>setShowWatchModal(false)}/>)}
+      {showProfileModal&&selected&&allSigs[selected.ticker]&&(<AssetProfileModal asset={selected} sig={allSigs[selected.ticker]} fmtMoney={fmtMoney} onClose={()=>setShowProfileModal(false)}/>)}
 
-@app.get("/api/prices", tags=["Prices"])
-async def get_multiple_prices(symbols: str = Query(...), delay_ms: int = Query(0)):
-    raw = [s.strip() for s in symbols.split(",") if s.strip()]
-    if not raw: raise HTTPException(400, "No symbols")
-    if len(raw) > 50: raise HTTPException(400, "Max 50 symbols")
-    sym_list = [normalise_symbol(s) for s in raw]
-    client = await get_client()
-    if delay_ms == 0:
-        results = await asyncio.gather(*[get_price(s, client) for s in sym_list])
-    else:
-        results = []
-        for s in sym_list:
-            results.append(await get_price(s, client))
-            await asyncio.sleep(delay_ms / 1000)
-    return {"symbols": sym_list, "count": len(results), "timestamp": int(time.time()), "data": {r["symbol"]: r for r in results}}
+      {/* HEADER */}
+      <div style={{borderBottom:"1px solid #0c0c18",padding:"7px 14px",display:"flex",alignItems:"center",gap:8,flexShrink:0,background:"#03030a",flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:900,letterSpacing:3,color:"#dde0ff"}}>MARKET <span style={{color:"#00b0ff"}}>BRAIN</span></div>
+          <div style={{fontSize:7,color:"#2a2a40",letterSpacing:1}}>Hi, {user.name} {saving&&<span style={{color:"#3a3a55"}}>· saving...</span>}</div>
+        </div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {[{l:"CASH",v:fmtMoney(toLocal(balance)),c:"#00b0ff"},{l:"INVESTED",v:fmtMoney(toLocal(portfolioStats.invested)),c:"#ffd600"},{l:"UNREALISED",v:fmtPct(portfolioStats.invested>0?portfolioStats.unrealised/portfolioStats.invested*100:0),c:pnlColor(portfolioStats.unrealised)},{l:"TOTAL P&L",v:`${totalPnL>=0?"+":""}${fmtMoney(toLocal(totalPnL))}`,c:pnlColor(totalPnL)}].map(m=>(<div key={m.l} style={{background:"#0a0a16",border:"1px solid #12121e",borderRadius:4,padding:"3px 7px",textAlign:"center"}}><div style={{fontSize:6,color:"#2a2a40",letterSpacing:1}}>{m.l}</div><div style={{fontSize:10,color:m.c,fontWeight:700,fontFamily:"monospace"}}>{m.v}</div></div>))}
+          {accuracy&&<div style={{background:"#0a0a16",border:`1px solid ${accuracy.overall>=60?"#00e676":"#ff6d00"}33`,borderRadius:4,padding:"3px 7px",textAlign:"center",cursor:"pointer"}} onClick={()=>setView("accuracy")}><div style={{fontSize:6,color:"#2a2a40",letterSpacing:1}}>ACCURACY</div><div style={{fontSize:10,color:accuracy.overall>=60?"#00e676":"#ff6d00",fontWeight:700,fontFamily:"monospace"}}>{accuracy.overall.toFixed(0)}%</div></div>}
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",gap:5,alignItems:"center"}}>
+          {isAdmin&&(<button onClick={()=>setShowAdmin(true)} style={{background:"#ff6d0018",border:"1px solid #ff6d0066",borderRadius:5,padding:"4px 9px",color:"#ff6d00",fontSize:8,letterSpacing:1,fontWeight:700}}>🛡️ ADMIN</button>)}
+          <div style={{fontSize:8,color:liveCount>0?"#00e676":"#3a3a50"}}>● {liveCount} LIVE</div>
+          <button onClick={()=>setShowCurrModal(true)} style={{background:"#0a0a16",border:"1px solid #00b0ff44",borderRadius:5,padding:"4px 9px",display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:13}}>{activeCurrency.flag}</span><span style={{fontSize:9,color:"#00b0ff",fontWeight:700}}>{activeCurrency.code}</span></button>
+          <button onClick={()=>setShowBudget(true)} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#ffd600",fontSize:8}}>💰 {sym}{balance.toFixed(0)}</button>
+          <button onClick={doRefresh} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#5a5a8a",fontSize:11}}>↻</button>
+          <button onClick={async()=>{await api("/api/auth/logout",{method:"POST"});localStorage.removeItem("mb_token");onLogout();}} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#5a5a7a",fontSize:8}}>LOG OUT</button>
+        </div>
+      </div>
 
-@app.get("/api/search", tags=["Prices"])
-async def search_symbol(q: str = Query(...)):
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=8", headers=HEADERS, timeout=8)
-            quotes = r.json().get("quotes", [])
-            return {"query": q, "results": [{"symbol": q["symbol"], "name": q.get("shortname") or q.get("longname"), "exchange": q.get("exchDisp")} for q in quotes if q.get("symbol")]}
-    except Exception as e:
-        raise HTTPException(500, f"Search failed: {e}")
+      {/* NAV */}
+      <div style={{borderBottom:"1px solid #0c0c18",padding:"0 14px",display:"flex",flexShrink:0,background:"#04040c"}}>
+        {[["market","📊 Market"],["portfolio",`💼 Portfolio${openTrades.length>0?" ("+openTrades.length+")":""}`],["watchlist",`★ Watch${watchingCount>0?" ("+watchingCount+")":""}`],["accuracy","🎯 Accuracy"]].map(([v,l])=>(<button key={v} onClick={()=>setView(v)} style={{background:"transparent",border:"none",borderBottom:`2px solid ${view===v?"#00b0ff":"transparent"}`,padding:"9px 14px",color:view===v?"#00b0ff":"#3a3a55",fontSize:9,letterSpacing:1,whiteSpace:"nowrap"}}>{l}</button>))}
+      </div>
 
+      {/* MARKET */}
+      {view==="market"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{borderBottom:"1px solid #0c0c18",padding:"6px 12px",background:"#04040c",flexShrink:0}}>
+            {/* Row 1: search + caps + vol + risk */}
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
+              <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="search ticker, name, sector..." style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:4,padding:"3px 7px",color:"#8a8aaa",fontSize:9,width:160}}/>
+              <div style={{display:"flex",gap:3,alignItems:"center"}}>
+                {CAPS.map(c=>(<Pill key={c} label={c} active={activeCap===c} color={CAP_COLORS[c]||"#00b0ff"} onClick={()=>setActiveCap(c)}/>))}
+              </div>
+              <div style={{marginLeft:"auto",display:"flex",gap:4,alignItems:"center"}}>
+                <select value={activeVol} onChange={e=>setActiveVol(e.target.value)} style={selectStyle}>
+                  <option value="All">All Volatility</option>
+                  {["Low","Med","High","VHigh","Extreme"].map(v=>(<option key={v} value={v}>{VOL_LABELS[v]}</option>))}
+                </select>
+                <select value={activeRisk} onChange={e=>setActiveRisk(e.target.value)} style={selectStyle}>
+                  <option value="All">All Risk</option>
+                  {["STRONG","POSITIVE","MODERATE","HIGH","CRITICAL"].map(r=>(<option key={r} value={r}>{RISK_CFG[r].label}</option>))}
+                </select>
+                <select value={sortMode} onChange={e=>setSortMode(e.target.value)} style={{...selectStyle,color:"#00b0ff"}}>
+                  <option value="bestTF">Best TF Score</option>
+                  <option value="score">Signal Score</option>
+                  <option value="rr">Risk/Reward</option>
+                  <option value="change">Best Movers ↑</option>
+                  <option value="change_neg">Worst Movers ↓</option>
+                  <option value="price_asc">Price: Low → High</option>
+                  <option value="price_desc">Price: High → Low</option>
+                  <option value="vol_asc">Volatility: Low → High</option>
+                  <option value="vol_desc">Volatility: High → Low</option>
+                </select>
+              </div>
+            </div>
+            {/* Row 2: sectors */}
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+              {SECTORS.map(s=>(<Pill key={s} label={s==="All"?"ALL":s.slice(0,7).toUpperCase()} active={activeSector===s} onClick={()=>setActiveSector(s)}/>))}
+              <div style={{marginLeft:"auto",fontSize:8,color:"#2a2a40"}}>{filtered.length} of {ASSETS.length} assets</div>
+            </div>
+          </div>
 
-# ── WebSocket ─────────────────────────────────────────────────
-class ConnectionManager:
-    def __init__(self): self.active: Dict[str, List[WebSocket]] = {}
-    async def connect(self, ws: WebSocket, symbol: str):
-        await ws.accept(); self.active.setdefault(symbol, []).append(ws)
-    def disconnect(self, ws: WebSocket, symbol: str):
-        if symbol in self.active:
-            self.active[symbol] = [w for w in self.active[symbol] if w != ws]
-            if not self.active[symbol]: del self.active[symbol]
+          <div style={{flex:1,display:"grid",gridTemplateColumns:selected?"1fr 360px":"1fr",overflow:"hidden",minHeight:0}}>
+            <div style={{overflowY:"auto",padding:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(162px,1fr))",gap:6}}>
+                {filtered.map(a=>{
+                  const sig=allSigs[a.ticker];if(!sig) return null;
+                  const R=RISK_CFG[sig.risk],bP=TF_PROFILES[sig.bestTF],bS=sig.tfScores[sig.bestTF];
+                  const pc=bS>=72?"#00e676":bS>=52?"#00d4ff":bS>=35?"#ffd600":"#ff6d00";
+                  const isSel=selected?.ticker===a.ticker;
+                  const hasProfile=!!ASSET_PROFILES[a.ticker];
+                  return(<div key={a.ticker} className="card-hover" onClick={()=>setSelected(isSel?null:a)}
+                    style={{background:isSel?R.bg:"#07070f",border:`1px solid ${isSel?R.color:"#12121e"}`,borderRadius:7,padding:"9px 10px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.15s"}}>
+                    <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:R.color}}/>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
+                      <span style={{fontSize:12,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{a.ticker}</span>
+                      <div style={{display:"flex",gap:3,alignItems:"center"}}>{sig.livePrice&&<span style={{fontSize:6,color:"#00e676"}}>●</span>}{hasProfile&&<span style={{fontSize:7,color:"#ffd600"}}>📋</span>}<Tag color={R.color} small>{R.label}</Tag></div>
+                    </div>
+                    <div style={{fontSize:8,color:"#2a2a3a",marginBottom:4}}>{a.name}</div>
+                    <div style={{background:bP.color+"18",border:`1px solid ${bP.color}33`,borderRadius:4,padding:"3px 6px",marginBottom:4,display:"flex",justifyContent:"space-between"}}>
+                      <span style={{fontSize:8,color:bP.color}}>{bP.icon} {bP.short}</span>
+                      <span style={{fontSize:9,color:pc,fontWeight:700,fontFamily:"monospace"}}>{bS.toFixed(0)}%</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:10,color:"#b0b0cc",fontFamily:"monospace"}}>{fmtMoney(sig.price)}</span>
+                      {sig.changePct!==0&&<span style={{fontSize:8,color:pnlColor(sig.changePct),fontFamily:"monospace"}}>{fmtPct(sig.changePct)}</span>}
+                    </div>
+                    <div style={{marginTop:3,display:"flex",gap:3}}>
+                      <Tag color={CAP_COLORS[a.cap]} small>{a.cap}</Tag>
+                      <Tag color="#2a2a40" small>{a.vol}</Tag>
+                    </div>
+                  </div>);
+                })}
+              </div>
+            </div>
 
-manager = ConnectionManager()
+            {/* Detail Panel */}
+            {selected&&allSigs[selected.ticker]&&(()=>{
+              const sig=allSigs[selected.ticker],R=RISK_CFG[sig.risk];
+              const assetWatches=watchItems.filter(w=>w.ticker===selected.ticker&&w.status==="watching");
+              const inWatch=assetWatches.length>0;
+              const hasProfile=!!ASSET_PROFILES[selected.ticker];
+              return(<div style={{borderLeft:"1px solid #0c0c18",overflowY:"auto",padding:14,background:"#04040c",display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#dde0ff"}}>{selected.ticker}</div>
+                    <div style={{fontSize:9,color:"#3a3a55"}}>{selected.name} · {selected.sub}</div>
+                    <div style={{display:"flex",gap:4,marginTop:3,flexWrap:"wrap"}}><Tag color={CAP_COLORS[selected.cap]}>{selected.cap} Cap</Tag><Tag color="#5a5a8a">{selected.sector}</Tag><Tag color="#3a3a6a">{selected.vol} Vol</Tag></div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:17,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{fmtMoney(sig.price)}</div>
+                    {sig.changePct!==0&&<div style={{fontSize:10,color:pnlColor(sig.changePct),fontFamily:"monospace"}}>{fmtPct(sig.changePct)}</div>}
+                    <div style={{marginTop:3,display:"flex",gap:3,justifyContent:"flex-end"}}>{sig.livePrice?<Tag color="#00e676">● LIVE</Tag>:<Tag color="#3a3a55">SIM</Tag>}<Tag color={R.color}>{R.label}</Tag></div>
+                  </div>
+                </div>
+                {inWatch&&<div style={{background:"#ffd60010",border:"1px solid #ffd60033",borderRadius:5,padding:"5px 8px",fontSize:8,color:"#ffd600"}}>★ Watching over {assetWatches.length} period{assetWatches.length>1?"s":""}</div>}
+                <div style={{background:"#0a0a16",borderRadius:6,padding:10}}>
+                  <div style={{fontSize:7,color:"#2a2a40",letterSpacing:2,marginBottom:8}}>TIMEFRAME ALIGNMENT</div>
+                  {TF_KEYS.map(k=>{const p=TF_PROFILES[k],sc=sig.tfScores[k];const pc=sc>=72?"#00e676":sc>=52?"#00d4ff":sc>=35?"#ffd600":"#ff6d00";return(<div key={k} style={{marginBottom:5}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><div style={{display:"flex",gap:4,alignItems:"center"}}><span style={{fontSize:9}}>{p.icon}</span><span style={{fontSize:8,color:sig.bestTF===k?p.color:"#5a5a7a",fontWeight:sig.bestTF===k?"700":"normal"}}>{p.short}</span>{sig.bestTF===k&&<Tag color={p.color} small>BEST</Tag>}</div><span style={{fontSize:9,color:pc,fontWeight:700,fontFamily:"monospace"}}>{sc.toFixed(0)}%</span></div><div style={{height:3,background:"#0e0e18",borderRadius:2,overflow:"hidden"}}><div style={{width:`${sc}%`,height:"100%",background:`linear-gradient(90deg,${pc}66,${pc})`,borderRadius:2}}/></div></div>);})}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                  <Stat label="R/R" value={`${sig.rrRatio}:1`} color={parseFloat(sig.rrRatio)>=2?"#00e676":"#ffd600"}/>
+                  <Stat label="UPSIDE" value={`+${sig.upsidePct}%`} color="#00e676"/>
+                  <Stat label="STOP" value={`-${sig.stopPct}%`} color="#ff1744"/>
+                  <Stat label="ENTRY Q" value={sig.entryQ} color={sig.entryQ==="IDEAL"?"#00e676":sig.entryQ==="GOOD"?"#00b0ff":sig.entryQ==="FAIR"?"#ffd600":"#ff6d00"}/>
+                  <Stat label="RSI" value={sig.metrics.rsi.toFixed(0)} color={sig.metrics.rsi<30?"#00e676":sig.metrics.rsi>70?"#ff1744":"#c0c0e0"}/>
+                  <Stat label="VOL x" value={sig.metrics.volume.toFixed(1)+"x"} color={sig.metrics.volume>1.5?"#00d4ff":"#c0c0e0"}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                  <button onClick={()=>setShowWatchModal(true)} style={{background:"#ffd60022",border:`1px solid ${inWatch?"#ffd60099":"#ffd600"}`,borderRadius:6,padding:"9px",color:"#ffd600",fontSize:9,letterSpacing:1}}>{inWatch?`★ WATCH AGAIN (${assetWatches.length})  `:"★ WATCH"}</button>
+                  <button onClick={()=>setShowTradeModal(true)} disabled={balance<toLocal(sig.price)} style={{background:balance>=toLocal(sig.price)?R.color+"22":"#1a1a2e",border:`1px solid ${balance>=toLocal(sig.price)?R.color:"#2a2a40"}`,borderRadius:6,padding:"9px",color:balance>=toLocal(sig.price)?R.color:"#3a3a50",fontSize:9,letterSpacing:1}}>📈 TRADE</button>
+                </div>
+                {hasProfile&&<button onClick={()=>setShowProfileModal(true)} style={{background:"#ffd60010",border:"1px solid #ffd60044",borderRadius:6,padding:"8px",color:"#ffd600",fontSize:9,letterSpacing:1}}>📋 VIEW ASSET PROFILE (PROS / CONS / ANALYSIS)</button>}
+                <div style={{fontSize:7,color:"#1a1a28",textAlign:"center"}}>Virtual simulation only. Not financial advice.</div>
+              </div>);
+            })()}
+          </div>
+        </div>
+      )}
 
-@app.websocket("/ws/{symbol}")
-async def websocket_price(websocket: WebSocket, symbol: str):
-    symbol = normalise_symbol(symbol)
-    await manager.connect(websocket, symbol)
-    client = await get_client()
-    try:
-        while True:
-            data = await get_price(symbol, client)
-            await websocket.send_json({**data, "ws": True})
-            await asyncio.sleep(3)
-    except WebSocketDisconnect: pass
-    except Exception as e: log.error(f"WS error {symbol}: {e}")
-    finally: manager.disconnect(websocket, symbol)
+      {/* PORTFOLIO */}
+      {view==="portfolio"&&(
+        <div style={{flex:1,overflowY:"auto",padding:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+            <Stat label="CASH" value={fmtMoney(toLocal(balance))} color="#00b0ff"/>
+            <Stat label="INVESTED" value={fmtMoney(toLocal(portfolioStats.invested))} color="#ffd600"/>
+            <Stat label="UNREALISED" value={fmtPct(portfolioStats.invested>0?portfolioStats.unrealised/portfolioStats.invested*100:0)} color={pnlColor(portfolioStats.unrealised)} sub={`${portfolioStats.unrealised>=0?"+":""}${fmtMoney(toLocal(portfolioStats.unrealised))}`}/>
+            <Stat label="TOTAL P&L" value={`${totalPnL>=0?"+":""}${fmtMoney(toLocal(totalPnL))}`} color={pnlColor(totalPnL)}/>
+          </div>
+          {/* Filters */}
+          <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:3}}>
+              {[["all","All"],["open","Open"],["closed","Closed"]].map(([v,l])=>(<Pill key={v} label={l} active={portfolioFilter===v} onClick={()=>setPortfolioFilter(v)}/>))}
+            </div>
+            <select value={portfolioSort} onChange={e=>setPortfolioSort(e.target.value)} style={selectStyle}>
+              <option value="date">Date (Newest)</option>
+              <option value="pnl_best">P&L (Best First)</option>
+              <option value="pnl_worst">P&L (Worst First)</option>
+              <option value="size">Position Size</option>
+            </select>
+            <div style={{fontSize:8,color:"#3a3a50",marginLeft:"auto"}}>{filteredTrades.length} positions</div>
+          </div>
 
+          {filteredTrades.filter(t=>t.status==="open").map(t=>{
+            const cp=allSigs[t.ticker]?toLocal(allSigs[t.ticker].price):t.entryPrice;
+            const pnl=(cp-t.entryPrice)*t.shares,pnlPct=((cp-t.entryPrice)/t.entryPrice)*100;
+            const tfP=TF_PROFILES[t.timeframe],R=RISK_CFG[t.signalRisk];
+            const asset=ASSETS.find(a=>a.ticker===t.ticker);
+            return(<div key={t.id} style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:12,marginBottom:7,borderLeft:`3px solid ${tfP.color}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div style={{cursor:"pointer"}} onClick={()=>{if(asset)setSelected(asset);setView("market");}}>
+                  <div style={{display:"flex",gap:5,alignItems:"center",marginBottom:2,flexWrap:"wrap"}}><span style={{fontSize:13,fontWeight:700,color:"#00b0ff",fontFamily:"monospace",textDecoration:"underline"}}>{t.ticker}</span><Tag color={tfP.color}>{tfP.icon} {tfP.short}</Tag><Tag color={R.color}>{R.label}</Tag><span style={{fontSize:8,color:"#3a3a55"}}>{t.shares} units</span></div>
+                  <div style={{fontSize:8,color:"#3a3a50"}}>{t.name}</div>
+                </div>
+                <button onClick={()=>closeTrade(t.id)} style={{background:"#ff174422",border:"1px solid #ff174466",borderRadius:5,padding:"5px 8px",color:"#ff1744",fontSize:8}}>CLOSE</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:6}}>
+                <Stat label="ENTRY" value={`${sym}${t.entryPrice.toFixed(2)}`}/>
+                <Stat label="NOW" value={`${sym}${cp.toFixed(2)}`} color={pnlColor(pnlPct)}/>
+                <Stat label="P&L%" value={fmtPct(pnlPct)} color={pnlColor(pnlPct)}/>
+                <Stat label="STOP" value={`-${t.stopPct}%`} color="#ff174477"/>
+                <Stat label="TARGET" value={`+${t.targetPct}%`} color="#00e67677"/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><div style={{fontSize:9,color:"#3a3a55"}}>Cost: {sym}{t.totalCost.toFixed(2)} · Signal: <span style={{color:tfP.color}}>{t.tfScore}%</span></div><div style={{fontSize:12,fontWeight:700,color:pnlColor(pnl),fontFamily:"monospace"}}>{pnl>=0?"+":"-"}{sym}{Math.abs(pnl).toFixed(2)}</div></div>
+            </div>);
+          })}
 
-# ── Static / frontend ─────────────────────────────────────────
-static_dir = Path("static")
-static_dir.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+          {filteredTrades.filter(t=>t.status!=="open").length>0&&(<>
+            <div style={{fontSize:9,color:"#5a5a7a",letterSpacing:2,marginBottom:8,marginTop:12}}>CLOSED ({filteredTrades.filter(t=>t.status!=="open").length})</div>
+            {filteredTrades.filter(t=>t.status!=="open").map(t=>{const tfP=TF_PROFILES[t.timeframe];const asset=ASSETS.find(a=>a.ticker===t.ticker);return(<div key={t.id} style={{background:"#06060e",border:`1px solid ${t.finalPnLPct>0?"#00e67622":"#ff174422"}`,borderRadius:6,padding:"9px 12px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{cursor:"pointer"}} onClick={()=>{if(asset)setSelected(asset);setView("market");}}><div style={{display:"flex",gap:5,alignItems:"center",marginBottom:2}}><span style={{fontSize:11,fontWeight:700,color:t.finalPnLPct>0?"#00e676":"#ff1744",fontFamily:"monospace",textDecoration:"underline"}}>{t.ticker}</span><Tag color={tfP.color}>{tfP.icon}</Tag><Tag color={CAP_COLORS[t.cap]||"#888"} small>{t.cap}</Tag></div><div style={{fontSize:8,color:"#4a4a6a"}}>{sym}{t.entryPrice.toFixed(2)} → {sym}{t.finalPrice?.toFixed(2)}</div></div>
+              <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:pnlColor(t.finalPnL),fontFamily:"monospace"}}>{t.finalPnL>=0?"+":"-"}{sym}{Math.abs(t.finalPnL).toFixed(2)}</div><div style={{fontSize:9,color:pnlColor(t.finalPnLPct),fontFamily:"monospace"}}>{fmtPct(t.finalPnLPct)}</div></div>
+            </div>);})}
+          </>)}
+          {filteredTrades.length===0&&<div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:7,padding:16,textAlign:"center",color:"#3a3a55",fontSize:10}}>No positions match this filter.</div>}
+        </div>
+      )}
 
-@app.get("/{full_path:path}", include_in_schema=False)
-async def serve_frontend(full_path: str):
-    index = Path("static/index.html")
-    if index.exists(): return FileResponse(index)
-    return {"status": "ok", "docs": "/docs"}
+      {/* WATCHLIST */}
+      {view==="watchlist"&&(
+        <div style={{flex:1,overflowY:"auto",padding:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
+            <div style={{display:"flex",gap:3}}>
+              {[["all","All"],["watching","Watching"],["expired","Expired"]].map(([v,l])=>(<Pill key={v} label={l} active={watchFilter===v} onClick={()=>setWatchFilter(v)}/>))}
+            </div>
+            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+              <select value={watchSort} onChange={e=>setWatchSort(e.target.value)} style={selectStyle}>
+                <option value="date">Date Added</option>
+                <option value="expiry">Expiry Soonest</option>
+                <option value="accuracy_best">Accuracy: Best</option>
+                <option value="accuracy_worst">Accuracy: Worst</option>
+              </select>
+              {watchItems.some(w=>w.status==="expired")&&<button onClick={()=>setWatchItems(p=>p.filter(w=>w.status==="watching"))} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:5,padding:"3px 8px",color:"#4a4a6a",fontSize:8}}>CLEAR EXPIRED</button>}
+            </div>
+            <div style={{fontSize:8,color:"#3a3a50"}}>{filteredWatches.length} items</div>
+          </div>
+          {filteredWatches.length===0&&<div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:7,padding:24,textAlign:"center",color:"#3a3a55",fontSize:10}}>No watch items match this filter.</div>}
+          {filteredWatches.map(w=>{
+            const tfP=TF_PROFILES[w.timeframe],now=Date.now(),pct=Math.min(100,((now-w.addedAt)/(w.expiresAt-w.addedAt))*100),expired=w.status==="expired";
+            const currentSig=allSigs[w.ticker];
+            const currentPrice=currentSig?.price||w.entryPrice;
+            const currentChg=((currentPrice-w.entryPrice)/w.entryPrice)*100;
+            const asset=ASSETS.find(a=>a.ticker===w.ticker);
+            return(<div key={w.id} style={{background:"#07070f",border:`1px solid ${expired?(w.dirCorrect?"#00e67644":"#ff174444"):"#1a1a2e"}`,borderRadius:8,padding:12,marginBottom:8,position:"relative",overflow:"hidden"}}>
+              {!expired&&<div style={{position:"absolute",top:0,left:0,height:2,width:`${pct}%`,background:tfP.color}}/>}
+              {expired&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:w.dirCorrect?"#00e676":"#ff1744"}}/>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div style={{cursor:"pointer"}} onClick={()=>{if(asset){setSelected(asset);setView("market");}}}>
+                  <div style={{display:"flex",gap:5,alignItems:"center",marginBottom:2}}><span style={{fontSize:13,fontWeight:700,color:"#00b0ff",fontFamily:"monospace",textDecoration:"underline"}}>{w.ticker}</span><Tag color={tfP.color}>{tfP.icon} {w.duration}</Tag>{expired&&<Tag color={w.dirCorrect?"#00e676":"#ff1744"}>{w.dirCorrect?"✓ CORRECT":"✗ MISS"}</Tag>}{!expired&&<Tag color={tfP.color}>WATCHING</Tag>}</div>
+                  <div style={{fontSize:8,color:"#3a3a50"}}>{w.name} · {w.sector} · {w.cap} Cap</div>
+                </div>
+                <button onClick={()=>setWatchItems(p=>p.filter(x=>x.id!==w.id))} style={{background:"none",border:"none",color:"#333",fontSize:12}}>×</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                <Stat label="ENTRY" value={fmtMoney(w.entryPrice)}/>
+                <Stat label="CURRENT" value={fmtMoney(currentPrice)} color={pnlColor(currentChg)}/>
+                <Stat label="NOW %" value={fmtPct(currentChg)} color={pnlColor(currentChg)}/>
+                <Stat label="PREDICTED" value={fmtMoney(w.predictedPrice)} color={w.predictedChg>0?"#00e676":"#ff1744"}/>
+                {expired?<Stat label="FINAL" value={fmtPct(w.actualChg)} color={pnlColor(w.actualChg)}/>:<Stat label="REMAINING" value={fmtMs(w.expiresAt-now)} color={tfP.color}/>}
+              </div>
+              {expired&&<div style={{background:w.dirCorrect?"#00e67610":"#ff174410",border:`1px solid ${w.dirCorrect?"#00e67644":"#ff174444"}`,borderRadius:6,padding:10}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:8,color:w.dirCorrect?"#00e676":"#ff1744",letterSpacing:2,marginBottom:2}}>PREDICTION RESULT</div><div style={{fontSize:10,color:"#c0c0e0"}}>{w.dirCorrect?"Direction correct ✓":"Direction missed ✗"} · Accuracy: <strong style={{color:w.dirCorrect?"#00e676":"#ff6d00"}}>{w.accuracy?.toFixed(0)}%</strong></div></div><div style={{textAlign:"right"}}><div style={{fontSize:7,color:"#2a2a40"}}>SIGNAL</div><div style={{fontSize:14,fontWeight:700,color:tfP.color,fontFamily:"monospace"}}>{w.tfScore}%</div></div></div></div>}
+              {!expired&&<div><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:7,color:"#3a3a50"}}>Progress</span><span style={{fontSize:7,color:tfP.color}}>{pct.toFixed(0)}% · {fmtMs(w.expiresAt-now)} left</span></div><div style={{height:4,background:"#0e0e18",borderRadius:2,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:tfP.color,borderRadius:2}}/></div></div>}
+            </div>);
+          })}
+        </div>
+      )}
 
+      {/* ACCURACY */}
+      {view==="accuracy"&&(
+        <div style={{flex:1,overflowY:"auto",padding:12}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#dde0ff",letterSpacing:2,marginBottom:12}}>PREDICTION ACCURACY REPORT</div>
+          {!accuracy?(<div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:24,textAlign:"center"}}><div style={{fontSize:28,marginBottom:8}}>📊</div><div style={{fontSize:11,color:"#4a4a6a",lineHeight:1.8}}>No results yet. Place trades or set watchlist timers to build data.</div></div>):(
+            <>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+                <Stat label="OVERALL WIN RATE" value={`${accuracy.overall.toFixed(0)}%`} color={accuracy.overall>=60?"#00e676":accuracy.overall>=45?"#ffd600":"#ff6d00"} sub={`${accuracy.wins}W / ${accuracy.losses}L`}/>
+                <Stat label="TOTAL RESULTS" value={accuracy.total} color="#c0c0e0"/>
+                <Stat label="AVG RETURN" value={fmtPct(accuracy.avgReturn)} color={pnlColor(accuracy.avgReturn)}/>
+                <Stat label="GRADE" value={accuracy.overall>=70?"A":accuracy.overall>=60?"B":accuracy.overall>=50?"C":"D"} color={accuracy.overall>=60?"#00e676":"#ff6d00"}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                  <div style={{fontSize:9,color:"#2a2a40",letterSpacing:2,marginBottom:10}}>BY CAP SIZE</div>
+                  {["Nano","Micro","Small","Mid","Large"].map(cap=>{
+                    const d=accuracy.byCap[cap];
+                    if(!d) return(<div key={cap} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0a0a14",opacity:0.3}}><div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{width:7,height:7,background:CAP_COLORS[cap],borderRadius:"50%",display:"inline-block"}}/><span style={{fontSize:9,color:"#3a3a50"}}>{cap}</span></div><span style={{fontSize:9,color:"#2a2a40"}}>No data</span></div>);
+                    const c=d.rate>=60?"#00e676":d.rate>=45?"#ffd600":"#ff6d00";
+                    return(<div key={cap} style={{padding:"6px 0",borderBottom:"1px solid #0a0a14"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{width:7,height:7,background:CAP_COLORS[cap],borderRadius:"50%",display:"inline-block"}}/><span style={{fontSize:10,color:"#c0c0e0"}}>{cap}</span><span style={{fontSize:7,color:"#3a3a50"}}>{d.wins}W/{d.total-d.wins}L</span></div><span style={{fontSize:11,color:c,fontWeight:700,fontFamily:"monospace"}}>{d.rate.toFixed(0)}%</span></div>
+                      <div style={{height:3,background:"#0e0e18",borderRadius:2,overflow:"hidden"}}><div style={{width:`${d.rate}%`,height:"100%",background:c,borderRadius:2}}/></div>
+                    </div>);
+                  })}
+                </div>
+                <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                  <div style={{fontSize:9,color:"#2a2a40",letterSpacing:2,marginBottom:10}}>BY SECTOR</div>
+                  {Object.entries(accuracy.bySector).sort((a,b)=>b[1].rate-a[1].rate).map(([sec,d])=>{
+                    const c=d.rate>=60?"#00e676":d.rate>=45?"#ffd600":"#ff6d00";
+                    return(<div key={sec} style={{padding:"5px 0",borderBottom:"1px solid #0a0a14"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:9,color:"#8a8aaa"}}>{sec} <span style={{color:"#3a3a50",fontSize:7}}>({d.wins}W/{d.total-d.wins}L)</span></span><span style={{fontSize:10,color:c,fontWeight:700,fontFamily:"monospace"}}>{d.rate.toFixed(0)}%</span></div>
+                      <div style={{height:3,background:"#0e0e18",borderRadius:2,overflow:"hidden"}}><div style={{width:`${d.rate}%`,height:"100%",background:c,borderRadius:2}}/></div>
+                    </div>);
+                  })}
+                </div>
+              </div>
+              <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:14}}>
+                <div style={{fontSize:9,color:"#2a2a40",letterSpacing:2,marginBottom:10}}>BY TIMEFRAME</div>
+                {TF_KEYS.map(k=>{
+                  const items=[...trades.filter(t=>t.status!=="open"&&t.timeframe===k),...watchItems.filter(w=>w.status==="expired"&&w.timeframe===k)];
+                  if(!items.length) return(<div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0a0a14",opacity:0.3}}><span style={{fontSize:9,color:"#3a3a50"}}>{TF_PROFILES[k].icon} {TF_PROFILES[k].short}</span><span style={{fontSize:9,color:"#2a2a40"}}>No data</span></div>);
+                  const wins=items.filter(t=>(t.finalPnLPct||t.actualChg||0)>0).length;
+                  const rate=(wins/items.length)*100,c=rate>=60?"#00e676":rate>=45?"#ffd600":"#ff6d00",p=TF_PROFILES[k];
+                  return(<div key={k} style={{padding:"5px 0",borderBottom:"1px solid #0a0a14"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:9,color:p.color}}>{p.icon} {p.short} <span style={{color:"#3a3a50",fontSize:7}}>({wins}W/{items.length-wins}L)</span></span><span style={{fontSize:10,color:c,fontWeight:700,fontFamily:"monospace"}}>{rate.toFixed(0)}%</span></div>
+                    <div style={{height:3,background:"#0e0e18",borderRadius:2,overflow:"hidden"}}><div style={{width:`${rate}%`,height:"100%",background:c,borderRadius:2}}/></div>
+                  </div>);
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False, log_level="info")
+      <div style={{borderTop:"1px solid #0e0e18",padding:"3px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,background:"#03030a"}}>
+        <span style={{fontSize:7,color:liveCount>0?"#00e676":"#3a3a50",animation:liveCount>0?"pulse 2s infinite":"none"}}>{liveCount>0?"● LIVE":"● SIM"}</span>
+        <span style={{fontSize:7,color:"#2a2a40"}}>{liveCount} live · {ASSETS.length-liveCount} sim · {ASSETS.length} assets total</span>
+        {lastUpdated&&<span style={{fontSize:7,color:"#1a1a28",marginLeft:"auto"}}>Updated {lastUpdated}</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── ROOT ──────────────────────────────────────────────────────
+function Root(){
+  const[user,setUser]=useState(null);
+  const[checking,setChecking]=useState(true);
+  useEffect(()=>{
+    const token=localStorage.getItem("mb_token");
+    if(!token){setChecking(false);return;}
+    api("/api/auth/me").then(u=>{setUser(u);setChecking(false);}).catch(()=>{localStorage.removeItem("mb_token");setChecking(false);});
+  },[]);
+  if(checking) return(<div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:32,height:32,border:"3px solid #1a1a2e",borderTop:"3px solid #00b0ff",borderRadius:"50%",animation:"spin 1s linear infinite"}}/></div>);
+  if(!user) return(<WelcomePage onAuth={u=>setUser(u)}/>);
+  return(<MainApp user={user} onLogout={()=>setUser(null)}/>);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>
