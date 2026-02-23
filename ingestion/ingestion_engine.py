@@ -1,4 +1,5 @@
 import sys, os
+sys.path.append(os.path.dirname(__file__))
 sys.path.append(os.path.join(os.path.dirname(__file__), "ingestion"))
 """
 Market Brain — Ingestion Engine
@@ -27,7 +28,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
-from ingestion.database import (
+from database import (
     init_db, upsert_asset, deactivate_asset, get_all_active_tickers,
     get_asset, start_run, complete_run, get_recent_runs, get_universe_summary,
     get_pending_notifications, mark_notifications_processed,
