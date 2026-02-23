@@ -1,6 +1,6 @@
 import sys, os
 sys.path.append(os.path.dirname(__file__))
-sys.path.append(os.path.join(os.path.dirname(__file__), "ingestion"))
+
 """
 Market Brain — Ingestion Engine
 ────────────────────────────────
@@ -37,6 +37,7 @@ from classifiers import (
     classify_asset, is_liquid_enough, is_allowed_exchange, normalise_ticker
 )
 from fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
@@ -388,8 +389,6 @@ async def run_scheduled():
     Runs a 'full' ingestion weekly, 'update' daily.
     Used when deployed as a long-running Railway service.
     """
-    import calendar
-
     log.info("Ingestion bot started in scheduled mode")
 
     # Run an update immediately on startup
