@@ -553,6 +553,331 @@ function AssetProfileModal({asset,sig,fmtMoney,onClose}){
   );
 }
 
+// ── ADVISORY ENGINE ───────────────────────────────────────────
+const POPUP_CATEGORIES={
+  HIGH_RISK:"high_risk_asset",
+  LOW_LIQUIDITY:"low_liquidity_hours",
+  RAPID_TRADING:"rapid_trading",
+  POOR_RR:"poor_risk_reward",
+  DIRECTION_BIAS:"direction_bias",
+  LOSS_STREAK:"loss_streak",
+  WATCHLIST_GAP:"watchlist_gap",
+  HIGH_VOL_REGIME:"high_vol_regime",
+  MODERATE_SIGNAL:"moderate_signal",
+  STRONG_SIGNAL:"strong_signal",
+};
+
+function getMarketSession(){
+  const now=new Date();
+  const utcH=now.getUTCHours(),utcM=now.getUTCMinutes();
+  const utcMins=utcH*60+utcM;
+  // London: 08:00-16:30 UTC; US: 13:30-20:00 UTC; Asian: 00:00-09:00 UTC
+  if(utcMins>=480&&utcMins<510) return{session:"london_open",label:"London Open",msg:"🇬🇧 The London session is opening. Expect increased volatility and wider spreads in the first 30 minutes.",color:"#ffd600"};
+  if(utcMins>=480&&utcMins<990) return{session:"london",label:"London Session",msg:"🇬🇧 London session is active. Good liquidity for European assets and forex majors.",color:"#00e676"};
+  if(utcMins>=810&&utcMins<840) return{session:"us_open",label:"US Open",msg:"🇺🇸 US market is opening soon. Trend reversals and sharp moves are common in the first hour.",color:"#ffd600"};
+  if(utcMins>=810&&utcMins<1200) return{session:"us",label:"US Session",msg:"🇺🇸 US session active. Peak liquidity for US equities, crypto, and forex.",color:"#00e676"};
+  if(utcMins>=1170&&utcMins<1200) return{session:"us_close",label:"US Market Close",msg:"🔔 Final 30 minutes of the US session. Profit-taking and sharp reversals are common at close.",color:"#ff6d00"};
+  if(utcMins>=0&&utcMins<540) return{session:"asian",label:"Asian Session",msg:"🌏 Asian session. Lower liquidity on US/EU assets. Better for JPY, AUD, and Asian equities.",color:"#00b0ff"};
+  return{session:"off_hours",label:"Off Hours",msg:"🌙 Outside main session hours. Liquidity may be lower and spreads wider. Crypto trades 24/7.",color:"#5a5a7a"};
+}
+
+function getBehaviouralAdvice(trades,watchItems){
+  const alerts=[];
+  const now=Date.now();
+  const recentTrades=trades.filter(t=>t.openedAt&&now-t.openedAt<3600000); // last hour
+  if(recentTrades.length>=3) alerts.push({cat:POPUP_CATEGORIES.RAPID_TRADING,icon:"⚡",msg:`You have opened ${recentTrades.length} trades in the last hour. Slowing down may help you avoid impulsive decisions.`,severity:"warn"});
+  const openLosers=trades.filter(t=>t.status==="open").filter(t=>t.stopPct&&t.stopPct>10);
+  if(openLosers.length>=2) alerts.push({cat:POPUP_CATEGORIES.HIGH_VOL_REGIME,icon:"⚠️",msg:"Your recent trades show increased risk exposure. Consider reviewing position sizes.",severity:"warn"});
+  const closedRecent=trades.filter(t=>t.status==="closed"&&t.closedAt&&now-t.closedAt<86400000*3);
+  const lossStreak=closedRecent.slice(-3).every(t=>(t.finalPnLPct||0)<0);
+  if(lossStreak&&closedRecent.length>=3) alerts.push({cat:POPUP_CATEGORIES.LOSS_STREAK,icon:"📉",msg:"Your last 3 trades were losses. Consider pausing and reviewing your entry criteria.",severity:"warn"});
+  const lastWatch=watchItems.length>0?Math.max(...watchItems.map(w=>w.addedAt||0)):0;
+  if(lastWatch>0&&now-lastWatch>86400000*2&&watchItems.some(w=>w.status==="watching")) alerts.push({cat:POPUP_CATEGORIES.WATCHLIST_GAP,icon:"★",msg:"You haven't reviewed your watchlist in 2+ days. Consistent review improves decision quality.",severity:"info"});
+  const recentDirections=closedRecent.slice(-4).map(t=>(t.finalPnLPct||0)>0?"up":"mixed");
+  const openTickers=new Set(trades.filter(t=>t.status==="open").map(t=>t.ticker));
+  if(openTickers.size>=4) alerts.push({cat:POPUP_CATEGORIES.DIRECTION_BIAS,icon:"🎯",msg:`You have ${openTickers.size} concurrent open positions. Ensure you're not overexposed to correlated assets.`,severity:"info"});
+  return alerts;
+}
+
+function getTradeAdvice(asset,sig,trades){
+  const advice=[];
+  const rr=parseFloat(sig.rrRatio);
+  const bestScore=sig.tfScores[sig.bestTF];
+  const volRisk={Low:false,Med:false,High:true,VHigh:true,Extreme:true}[asset.vol]||false;
+  if(rr<1) advice.push({icon:"⚠️",color:"#ff6d00",msg:"Risk-to-reward ratio is below 1:1. Consider waiting for a stronger setup before entering."});
+  else if(rr>=3) advice.push({icon:"✅",color:"#00e676",msg:`Strong R/R of ${rr}:1 detected. This setup offers good reward potential relative to defined risk.`});
+  if(bestScore>=75) advice.push({icon:"🎯",color:"#00e676",msg:`Engine confidence is HIGH (${bestScore.toFixed(0)}%). This setup aligns with past high-probability patterns for ${TF_PROFILES[sig.bestTF].short}.`});
+  else if(bestScore>=55) advice.push({icon:"📊",color:"#ffd600",msg:`Engine confidence is MODERATE (${bestScore.toFixed(0)}%). Similar setups have shown mixed results. Review supporting indicators carefully.`});
+  else advice.push({icon:"🔴",color:"#ff6d00",msg:`Engine confidence is LOW (${bestScore.toFixed(0)}%). This setup has weak alignment. Consider waiting for better conditions.`});
+  if(volRisk) advice.push({icon:"💥",color:"#ff6d00",msg:`${asset.vol} volatility detected. Smaller position sizes are strongly recommended. Use the 2% rule as a starting point.`});
+  if(sig.metrics.rsi>70) advice.push({icon:"📈",color:"#ffd600",msg:`RSI is elevated at ${sig.metrics.rsi.toFixed(0)}. This may indicate short-term exhaustion. Consider whether buying here suits your timeframe.`});
+  else if(sig.metrics.rsi<30) advice.push({icon:"📉",color:"#00e676",msg:`RSI is oversold at ${sig.metrics.rsi.toFixed(0)}. Historically, similar conditions have preceded mean-reversion bounces.`});
+  if(sig.metrics.volume>2) advice.push({icon:"📊",color:"#00b0ff",msg:`Volume is ${sig.metrics.volume.toFixed(1)}x above average. Elevated volume often precedes trend acceleration or reversal.`});
+  if(sig.entryQ==="POOR") advice.push({icon:"⏳",color:"#ff1744",msg:"Entry quality is rated POOR. Price may be extended. Waiting for a pullback or confirmation could improve your risk profile."});
+  return advice;
+}
+
+function getUserInsights(trades,watchItems,asset,sig){
+  const insights=[];
+  const closed=trades.filter(t=>t.status!=="open");
+  if(closed.length<3) return insights;
+  // Best timeframe for this user
+  const tfWins={};
+  TF_KEYS.forEach(k=>{const items=closed.filter(t=>t.timeframe===k);if(items.length>=2){const w=items.filter(t=>(t.finalPnLPct||0)>0).length;tfWins[k]=(w/items.length)*100;}});
+  const bestTfForUser=Object.entries(tfWins).sort((a,b)=>b[1]-a[1])[0];
+  if(bestTfForUser&&bestTfForUser[0]!==sig.bestTF) insights.push({icon:"🧠",msg:`Your personal accuracy is highest on ${TF_PROFILES[bestTfForUser[0]].short} timeframes (${bestTfForUser[1].toFixed(0)}% win rate). The engine currently favours ${TF_PROFILES[sig.bestTF].short}.`});
+  // Best cap tier
+  const capWins={};
+  CAPS.filter(c=>c!=="All").forEach(cap=>{const items=closed.filter(t=>t.cap===cap);if(items.length>=2){const w=items.filter(t=>(t.finalPnLPct||0)>0).length;capWins[cap]=(w/items.length)*100;}});
+  const bestCap=Object.entries(capWins).sort((a,b)=>b[1]-a[1])[0];
+  if(bestCap&&bestCap[0]!==asset.cap) insights.push({icon:"📐",msg:`Your best results come from ${bestCap[0]} Cap assets (${bestCap[1].toFixed(0)}% win rate). This is a ${asset.cap} Cap asset.`});
+  return insights;
+}
+
+// ── POPUP SYSTEM ──────────────────────────────────────────────
+const DISMISSED_KEY="mb_dismissed_popups";
+function getDismissed(){try{return JSON.parse(localStorage.getItem(DISMISSED_KEY)||"{}");}catch{return{};}}
+function dismissPopup(cat){const d=getDismissed();d[cat]=true;localStorage.setItem(DISMISSED_KEY,JSON.stringify(d));}
+function resetDismissed(){localStorage.removeItem(DISMISSED_KEY);}
+
+function SmartAdvicePanel({adviceList,userInsights,onDismissAll}){
+  if(!adviceList.length&&!userInsights.length) return null;
+  return(
+    <div style={{background:"#07070f",border:"1px solid #ffd60033",borderRadius:8,padding:12,marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontSize:8,color:"#ffd600",letterSpacing:2}}>💡 SMART TRADING ADVICE</div>
+        {onDismissAll&&<button onClick={onDismissAll} style={{background:"none",border:"none",color:"#3a3a50",fontSize:8,cursor:"pointer"}}>dismiss all</button>}
+      </div>
+      {adviceList.map((a,i)=>(<div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:"1px solid #0a0a14",alignItems:"flex-start"}}>
+        <span style={{fontSize:13,flexShrink:0}}>{a.icon}</span>
+        <span style={{fontSize:9,color:a.color||"#a0a0c0",lineHeight:1.6}}>{a.msg}</span>
+      </div>))}
+      {userInsights.map((a,i)=>(<div key={"ui"+i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:"1px solid #0a0a14",alignItems:"flex-start"}}>
+        <span style={{fontSize:13,flexShrink:0}}>{a.icon}</span>
+        <span style={{fontSize:9,color:"#8a8acc",lineHeight:1.6}}>{a.msg}</span>
+      </div>))}
+    </div>
+  );
+}
+
+function BehaviourBanner({alerts,dismissed,onDismiss}){
+  const visible=alerts.filter(a=>!dismissed[a.cat]);
+  if(!visible.length) return null;
+  const a=visible[0];
+  return(
+    <div style={{background:"#0a0800",border:`1px solid ${a.severity==="warn"?"#ff6d0055":"#00b0ff33"}`,borderRadius:6,padding:"7px 10px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+      <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
+        <span style={{fontSize:12}}>{a.icon}</span>
+        <span style={{fontSize:9,color:a.severity==="warn"?"#ff9d30":"#8a8aaa",lineHeight:1.6}}>{a.msg}</span>
+      </div>
+      <button onClick={()=>onDismiss(a.cat)} style={{background:"none",border:"none",color:"#333",fontSize:10,flexShrink:0,cursor:"pointer"}}>×</button>
+    </div>
+  );
+}
+
+function SessionBanner({session}){
+  const[show,setShow]=useState(true);
+  if(!show) return null;
+  return(
+    <div style={{background:"#06060e",border:`1px solid ${session.color}33`,borderRadius:5,padding:"5px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+      <span style={{fontSize:9,color:session.color,lineHeight:1.5}}>{session.msg}</span>
+      <button onClick={()=>setShow(false)} style={{background:"none",border:"none",color:"#333",fontSize:10,cursor:"pointer"}}>×</button>
+    </div>
+  );
+}
+
+// ── POPUP MODAL WITH DISMISS CONTROL ──────────────────────────
+function AdvicePopup({title,items,onClose,category}){
+  const[doNotShow,setDoNotShow]=useState(false);
+  const handleClose=()=>{if(doNotShow&&category)dismissPopup(category);onClose();};
+  return(
+    <Modal onClose={handleClose} maxWidth={400}>
+      <div style={{background:"#0a0a16",borderBottom:"1px solid #ffd60033",padding:"12px 16px",borderRadius:"12px 12px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#ffd600",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:2}}>💡 {title}</div>
+        <button onClick={handleClose} style={{background:"none",border:"none",color:"#444",fontSize:16}}>×</button>
+      </div>
+      <div style={{padding:"12px 16px"}}>
+        {items.map((a,i)=>(<div key={i} style={{display:"flex",gap:8,padding:"7px 0",borderBottom:"1px solid #0a0a14",alignItems:"flex-start"}}>
+          <span style={{fontSize:14,flexShrink:0}}>{a.icon}</span>
+          <span style={{fontSize:10,color:a.color||"#a0a0c0",lineHeight:1.7}}>{a.msg}</span>
+        </div>))}
+        {category&&(
+          <label style={{display:"flex",alignItems:"center",gap:8,marginTop:12,cursor:"pointer"}}>
+            <input type="checkbox" checked={doNotShow} onChange={e=>setDoNotShow(e.target.checked)} style={{accentColor:"#00b0ff"}}/>
+            <span style={{fontSize:9,color:"#4a4a6a"}}>Do not show this type of advice again</span>
+          </label>
+        )}
+        <button onClick={handleClose} style={{width:"100%",marginTop:10,background:"#ffd60022",border:"1px solid #ffd600",borderRadius:6,padding:"9px",color:"#ffd600",fontSize:9,letterSpacing:1}}>GOT IT</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── HELP PAGES ────────────────────────────────────────────────
+const HELP_TOPICS=[
+  {id:"navigation",title:"📍 Navigating Market Brain",content:[
+    {h:"The Main Menu",p:"Use the tab bar at the top to switch between Market, Portfolio, Watchlist, and Accuracy views. The Admin panel is accessible via the 🛡️ button if you have admin permissions."},
+    {h:"Header Stats",p:"The header shows your live Cash balance, total amount Invested, Unrealised P&L, and Total P&L at a glance. Click the Accuracy badge to jump to your performance report."},
+    {h:"Currency Selector",p:"Click your flag/currency code to switch all prices to any of 17 supported currencies. Conversion uses live FX rates where available."},
+  ]},
+  {id:"asset_grid",title:"📊 Using the Asset Grid",content:[
+    {h:"Asset Cards",p:"Each card shows the ticker, name, best timeframe alignment score, current price, and change %. A 📋 icon means a full asset profile (pros/cons/analysis) is available."},
+    {h:"Colour Coding",p:"The top bar colour on each card reflects the signal risk: Blue = STRONG, Green = OPPORTUNITY, Yellow = MODERATE, Orange = HIGH, Red = CRITICAL."},
+    {h:"Live vs Simulated",p:"A green ● dot means the price is live from Yahoo Finance. Without it, the price is a simulated estimate using historical range data."},
+    {h:"Selecting an Asset",p:"Click any card to open the detail panel on the right. From there you can view timeframe scores, place a trade, or add to your watchlist."},
+  ]},
+  {id:"signals",title:"🎯 Understanding Projections & Signals",content:[
+    {h:"Signal Score",p:"Ranges from -100 to +100. Positive scores indicate bullish conditions; negative indicate bearish. The score combines RSI, MACD, volume, sentiment, insider activity, sector flow, and more."},
+    {h:"Timeframe Alignment",p:"Each asset is scored across 5 timeframes: Intraday (0-24h), Short Swing (2-5d), Medium Swing (1-4wk), Position (1-6mo), and Long Term (6mo+). Higher % = stronger setup for that horizon."},
+    {h:"Entry Quality",p:"IDEAL = oversold with pullback. GOOD = moderate RSI with rising volume. FAIR = neutral. POOR = extended/overbought — consider waiting."},
+    {h:"R/R Ratio",p:"Risk-to-Reward ratio. A ratio of 2:1 or above means you stand to gain at least twice what you risk. Aim for 2:1 minimum before entering."},
+    {h:"Probability Note",p:"All projections are educational simulations. They are not guarantees. Use them as one input in a broader decision process."},
+  ]},
+  {id:"risk",title:"🛡️ Understanding Risk Categories",content:[
+    {h:"STRONG (Blue)",p:"High signal alignment across most indicators. Strong trend, good momentum, favourable macro context. Best setups."},
+    {h:"OPPORTUNITY (Green)",p:"Positive bias with decent indicator confirmation. Good setups with manageable risk."},
+    {h:"MODERATE (Yellow)",p:"Mixed signals. Some indicators bullish, others neutral or negative. Proceed with caution and smaller size."},
+    {h:"HIGH (Orange)",p:"Mostly negative signal alignment. Short-term bearish bias. Better suited for watching than trading unless hedging."},
+    {h:"CRITICAL (Red)",p:"Strong negative alignment across most indicators. High risk of continued downside. Avoid new long positions."},
+  ]},
+  {id:"trades",title:"💼 Virtual Trading",content:[
+    {h:"Placing a Trade",p:"Click an asset card, then click 📈 TRADE. Choose your timeframe, set your stop loss % and target %, enter quantity, and confirm."},
+    {h:"The 2% Rule",p:"Click 'Use 2% rule' to auto-calculate a safe position size. This limits your maximum loss to 2% of your account balance — a core risk management principle."},
+    {h:"Closing a Trade",p:"Go to Portfolio → open positions → click CLOSE. The current market price is used to calculate your P&L."},
+    {h:"P&L Tracking",p:"Portfolio tracks unrealised P&L on open positions and locks in final P&L when you close. All currency-converted using live FX rates."},
+  ]},
+  {id:"watchlist",title:"★ Watchlist & Predictions",content:[
+    {h:"Adding a Watch",p:"Click ★ WATCH on any asset detail panel. Choose a duration (24h to 6 months). The engine logs its prediction for that period."},
+    {h:"Multiple Watches",p:"You can watch the same asset over multiple timeframes simultaneously — useful for tracking short vs long-term engine accuracy."},
+    {h:"Current Price Tracking",p:"Active watches show current price and % move in real-time alongside the engine's predicted target."},
+    {h:"Expired Watches",p:"When a watch expires, the system compares the engine's predicted direction to the actual outcome and scores it CORRECT or MISS."},
+  ]},
+  {id:"accuracy",title:"🎯 Accuracy & Performance",content:[
+    {h:"Overall Win Rate",p:"Percentage of trades and expired watches where the outcome matched the engine's projected direction."},
+    {h:"By Cap Size",p:"Breakdown of win rate by market capitalisation tier. Useful for identifying which cap sizes your strategy performs best on."},
+    {h:"By Sector",p:"Which sectors are your strongest? Helps you focus on where the engine's signals are most reliable for your trading style."},
+    {h:"By Timeframe",p:"Your win rate broken down by the timeframe you selected when entering. Reveals whether you're better suited for short or long-term setups."},
+    {h:"Grade",p:"A = 70%+, B = 60%+, C = 50%+, D = below 50%. Grades give you a quick benchmark against market expectations."},
+  ]},
+  {id:"filters",title:"🔍 Filters & Sorting",content:[
+    {h:"Sector Filter",p:"Click any sector pill to filter the grid. 'ALL' shows everything. Useful for focusing on a theme or market segment."},
+    {h:"Cap Filter",p:"Filter by market cap tier: Nano, Micro, Small, Mid, Large. Smaller caps carry higher volatility and risk."},
+    {h:"Volatility Filter",p:"Filter by volatility regime: Low → Extreme. Use this to match assets to your risk appetite."},
+    {h:"Risk Filter",p:"Show only assets matching a specific signal risk level. Combine with timeframe sort to find high-confidence setups."},
+    {h:"Sort Options",p:"Sort by Best TF Score, Signal Score, R/R Ratio, Price, % Change (best/worst), or Volatility. Use 'Best Movers' to find momentum."},
+  ]},
+  {id:"popups",title:"🔔 Managing Guidance Pop-ups",content:[
+    {h:"What are pop-ups?",p:"Pop-ups provide contextual trading advice: time-of-day warnings, behavioural reminders, signal confidence alerts, and educational notes."},
+    {h:"Dismissing a pop-up",p:"Every advisory panel has a 'Do not show this again' checkbox. Tick it before closing to permanently suppress that category."},
+    {h:"Re-enabling pop-ups",p:"Go to Help → Settings → Reset Trading Guidance Preferences to restore all dismissed pop-up categories."},
+  ]},
+  {id:"glossary",title:"📖 Glossary of Trading Terms",content:[
+    {h:"RSI (Relative Strength Index)",p:"Momentum indicator ranging 0-100. Above 70 = potentially overbought. Below 30 = potentially oversold."},
+    {h:"MACD",p:"Trend-following indicator showing relationship between two moving averages. Positive = upward momentum; negative = downward momentum."},
+    {h:"Volume",p:"Number of shares/units traded. High volume during a move adds conviction. Low volume moves are less reliable."},
+    {h:"Stop Loss",p:"The price level at which you exit a losing trade to limit your loss. Always define your stop before entering."},
+    {h:"Risk/Reward (R/R)",p:"Ratio of potential gain to potential loss. 2:1 means you target $2 profit for every $1 risked."},
+    {h:"Cap Size",p:"Market capitalisation tier. Large Cap = most stable/liquid. Nano Cap = highest risk/reward potential."},
+    {h:"Volatility Regime",p:"Classification of how much an asset moves. Extreme volatility means larger swings — both opportunities and risks are amplified."},
+    {h:"Timeframe Alignment",p:"How well the current market setup matches patterns that historically work within a given trading horizon."},
+    {h:"Bull/Bear Regime",p:"Bull = prices trending upward over time. Bear = prices trending downward. Most strategies work better in aligned regimes."},
+    {h:"Liquidity",p:"How easily an asset can be bought or sold without impacting the price. High liquidity = tighter spreads, faster fills."},
+  ]},
+  {id:"faq",title:"❓ Frequently Asked Questions",content:[
+    {h:"Is this real money?",p:"No. Market Brain is a virtual simulation only. No real money is involved. All trades and balances are for educational and practice purposes."},
+    {h:"Are the prices real?",p:"Live prices are fetched from Yahoo Finance where available. Some assets may show simulated prices if the live feed is unavailable."},
+    {h:"How accurate is the engine?",p:"The engine is an educational signal tool, not a trading algorithm. Track your accuracy over time in the Accuracy tab to see how well the signals align with your results."},
+    {h:"Can I reset my portfolio?",p:"Yes. Click the 💰 budget button in the header to set a new virtual budget — this resets all trades and watches."},
+    {h:"Why is my asset showing SIM instead of LIVE?",p:"The live price fetch from Yahoo Finance may have failed or the market is closed. The SIM price is generated from historical range data."},
+    {h:"How do I add an asset not on the list?",p:"The asset universe currently covers 260+ instruments. Custom asset requests can be submitted to the admin team."},
+  ]},
+];
+
+function HelpPage({onClose}){
+  const[topic,setTopic]=useState(HELP_TOPICS[0].id);
+  const[showReset,setShowReset]=useState(false);
+  const current=HELP_TOPICS.find(t=>t.id===topic);
+  return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden",background:"#03030a"}}>
+      <div style={{borderBottom:"1px solid #0c0c18",padding:"8px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <button onClick={onClose} style={{background:"transparent",border:"1px solid #1a1a2e",borderRadius:5,padding:"5px 10px",color:"#00b0ff",fontSize:9}}>← BACK</button>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:900,letterSpacing:3,color:"#dde0ff"}}>MARKET <span style={{color:"#00b0ff"}}>BRAIN</span> <span style={{color:"#3a3a55",fontWeight:400,fontSize:14}}>Help Centre</span></div>
+      </div>
+      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {/* Sidebar */}
+        <div style={{width:200,borderRight:"1px solid #0c0c18",overflowY:"auto",padding:8,gap:3,display:"flex",flexDirection:"column",flexShrink:0,background:"#04040c"}}>
+          {HELP_TOPICS.map(t=>(<button key={t.id} onClick={()=>setTopic(t.id)} style={{background:topic===t.id?"#00b0ff18":"transparent",border:`1px solid ${topic===t.id?"#00b0ff44":"transparent"}`,borderRadius:6,padding:"8px 10px",color:topic===t.id?"#00b0ff":"#3a3a55",fontSize:9,textAlign:"left"}}>{t.title}</button>))}
+          <div style={{borderTop:"1px solid #0c0c18",marginTop:8,paddingTop:8}}>
+            <div style={{fontSize:7,color:"#2a2a40",letterSpacing:1,marginBottom:6}}>SETTINGS</div>
+            <button onClick={()=>setShowReset(true)} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:6,padding:"7px 10px",color:"#5a5a7a",fontSize:8,textAlign:"left",width:"100%"}}>🔔 Reset Pop-up Preferences</button>
+          </div>
+        </div>
+        {/* Content */}
+        <div style={{flex:1,overflowY:"auto",padding:20}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#dde0ff",letterSpacing:2,marginBottom:16}}>{current.title}</div>
+          {current.content.map((c,i)=>(<div key={i} style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#00b0ff",marginBottom:4,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>{c.h}</div>
+            <p style={{fontSize:10,color:"#8a8aaa",lineHeight:1.8}}>{c.p}</p>
+          </div>))}
+        </div>
+      </div>
+      {showReset&&(<Modal onClose={()=>setShowReset(false)} maxWidth={320}>
+        <div style={{padding:20}}>
+          <div style={{fontSize:14,fontWeight:700,color:"#dde0ff",marginBottom:6,fontFamily:"'Barlow Condensed',sans-serif"}}>RESET POP-UP PREFERENCES</div>
+          <p style={{fontSize:10,color:"#5a5a7a",lineHeight:1.7,marginBottom:14}}>This will re-enable all trading guidance pop-ups that you previously dismissed.</p>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <button onClick={()=>setShowReset(false)} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:6,padding:"9px",color:"#4a4a6a",fontSize:9}}>CANCEL</button>
+            <button onClick={()=>{resetDismissed();setShowReset(false);}} style={{background:"#00b0ff22",border:"1px solid #00b0ff",borderRadius:6,padding:"9px",color:"#00b0ff",fontSize:9}}>RESET ALL</button>
+          </div>
+        </div>
+      </Modal>)}
+    </div>
+  );
+}
+
+// ── ONBOARDING TUTORIAL ───────────────────────────────────────
+const TUTORIAL_STEPS=[
+  {title:"Welcome to Market Brain",icon:"🧠",content:"Market Brain is a virtual trading simulator with a signal engine covering 260+ assets across stocks, crypto, forex, metals, commodities, and more. Everything here is simulated — no real money involved.",highlight:null},
+  {title:"Reading an Asset Card",icon:"📊",content:"Each card shows: Ticker · Name · Best timeframe alignment score · Live or simulated price · % change. The coloured bar at the top reflects signal risk: Blue = Strong, Green = Opportunity, Yellow = Moderate, Orange = High, Red = Critical.",highlight:"market"},
+  {title:"Opening the Detail Panel",icon:"🔍",content:"Click any asset card to open the detail panel on the right. Here you'll see full timeframe alignment scores, key metrics (RSI, volume, R/R), entry quality rating, and action buttons.",highlight:"market"},
+  {title:"Creating a Watch",icon:"★",content:"In the detail panel, click ★ WATCH to add an asset to your watchlist. Choose a duration from 24 hours to 6 months. The engine logs its prediction, and when the timer expires it scores itself against the actual outcome.",highlight:"watchlist"},
+  {title:"Placing a Virtual Trade",icon:"📈",content:"Click 📈 TRADE in the detail panel. Set your timeframe, stop loss %, target %, and quantity. Use the '2% rule' button to auto-size safely. Your virtual balance updates instantly.",highlight:"portfolio"},
+  {title:"Understanding Risk & Probability",icon:"🎯",content:"The engine scores assets from -100 (very bearish) to +100 (very bullish). Timeframe alignment % shows how well conditions match that horizon. R/R ratio shows reward vs risk. Aim for 2:1+ minimum.",highlight:null},
+  {title:"Using Filters & Sorting",icon:"🔍",content:"Use the sector pills, cap tier filters, volatility and risk dropdowns to narrow down assets. Sort by Best TF Score to find top setups, or by Movers to find assets with the biggest current moves.",highlight:"market"},
+  {title:"Tracking Your Accuracy",icon:"🎯",content:"The Accuracy tab shows your win rate broken down by cap size, sector, and timeframe. This helps you discover where you — and the engine — perform best over time.",highlight:"accuracy"},
+  {title:"Smart Trading Advice",icon:"💡",content:"The platform provides real-time guidance: time-of-day session alerts, behavioural reminders if you're overtrading, and signal-specific advice before you place a trade. You can dismiss any guidance type permanently.",highlight:null},
+  {title:"You're Ready!",icon:"🚀",content:"That's the core of Market Brain. Explore the asset grid, set some watches, practice a few virtual trades, and check your accuracy over time. Visit the Help Centre anytime from the nav bar.",highlight:null},
+];
+
+function Tutorial({onComplete,onSkip}){
+  const[step,setStep]=useState(0);
+  const s=TUTORIAL_STEPS[step];
+  const isLast=step===TUTORIAL_STEPS.length-1;
+  return(
+    <div style={{position:"fixed",inset:0,background:"#000000ee",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#07070f",border:"1px solid #00b0ff44",borderRadius:14,maxWidth:480,width:"100%",padding:28,animation:"fadeIn 0.3s ease"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div style={{fontSize:36}}>{s.icon}</div>
+          <button onClick={onSkip} style={{background:"none",border:"none",color:"#3a3a55",fontSize:9,cursor:"pointer"}}>SKIP TUTORIAL</button>
+        </div>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:"#dde0ff",letterSpacing:1,marginBottom:10}}>{s.title}</div>
+        <p style={{fontSize:11,color:"#8a8aaa",lineHeight:1.8,marginBottom:20}}>{s.content}</p>
+        {/* Progress dots */}
+        <div style={{display:"flex",gap:5,marginBottom:20,justifyContent:"center"}}>
+          {TUTORIAL_STEPS.map((_,i)=>(<div key={i} style={{width:i===step?20:6,height:6,borderRadius:3,background:i===step?"#00b0ff":i<step?"#00b0ff44":"#1a1a2e",transition:"all 0.2s"}}/>))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:7,padding:"10px",color:"#4a4a6a",fontSize:10}}>← BACK</button>}
+          <button onClick={()=>isLast?onComplete():setStep(s=>s+1)} style={{gridColumn:step===0?"1 / -1":"auto",background:isLast?"linear-gradient(135deg,#00b0ff,#0080cc)":"#00b0ff22",border:`1px solid ${isLast?"transparent":"#00b0ff"}`,borderRadius:7,padding:"10px",color:isLast?"#fff":"#00b0ff",fontSize:10,letterSpacing:1,fontWeight:700}}>
+            {isLast?"LET'S GO →":"NEXT →"}
+          </button>
+        </div>
+        <div style={{fontSize:8,color:"#2a2a40",textAlign:"center",marginTop:10}}>Step {step+1} of {TUTORIAL_STEPS.length}</div>
+      </div>
+    </div>
+  );
+}
+
 // ── WELCOME / AUTH PAGE ───────────────────────────────────────
 function WelcomePage({onAuth}){
   const[mode,setMode]=useState("home");
@@ -964,6 +1289,15 @@ function MainApp({user,onLogout}){
   // Watchlist filters
   const[watchFilter,setWatchFilter]=useState("all");
   const[watchSort,setWatchSort]=useState("date");
+  // Tutorial & Help
+  const[showTutorial,setShowTutorial]=useState(()=>!localStorage.getItem("mb_tutorial_done"));
+  const[showHelp,setShowHelp]=useState(false);
+  // Advice popup state
+  const[advicePopup,setAdvicePopup]=useState(null);
+  // Behaviour banners dismissed per session
+  const[sessionDismissed,setSessionDismissed]=useState({});
+  // Market session (computed once on mount)
+  const[marketSession]=useState(()=>getMarketSession());
 
   const isAdmin=user.role==="admin"||user.role==="super_admin";
 
@@ -1030,7 +1364,24 @@ function MainApp({user,onLogout}){
 
   const accuracy=useMemo(()=>calcAccuracy(trades,watchItems),[trades,watchItems]);
 
-  const placeTrade=useCallback((td)=>{setTrades(p=>[...p,td]);setBalance(p=>parseFloat((p-td.totalCost).toFixed(2)));},[]);
+  const completeTutorial=useCallback(()=>{localStorage.setItem("mb_tutorial_done","1");setShowTutorial(false);},[]);
+
+  const openTradeWithAdvice=useCallback((asset,sig)=>{
+    const dismissed=getDismissed();
+    const tradeAdvice=getTradeAdvice(asset,sig,trades);
+    const userIns=getUserInsights(trades,watchItems,asset,sig);
+    const allAdvice=[...tradeAdvice,...userIns];
+    const shouldShow=allAdvice.length>0&&!dismissed[POPUP_CATEGORIES.MODERATE_SIGNAL];
+    if(shouldShow){
+      setAdvicePopup({items:allAdvice,category:POPUP_CATEGORIES.MODERATE_SIGNAL,onConfirm:()=>{setAdvicePopup(null);setShowTradeModal(true);}});
+    }else{
+      setShowTradeModal(true);
+    }
+  },[trades,watchItems]);
+
+  const behaviouralAlerts=useMemo(()=>getBehaviouralAdvice(trades,watchItems),[trades,watchItems]);
+  const visibleAlerts=behaviouralAlerts.filter(a=>!sessionDismissed[a.cat]&&!getDismissed()[a.cat]);
+  const dismissAlert=useCallback((cat)=>setSessionDismissed(p=>({...p,[cat]:true})),[]);
   const closeTrade=useCallback((id)=>{
     setTrades(p=>p.map(t=>{
       if(t.id!==id) return t;
@@ -1124,6 +1475,31 @@ function MainApp({user,onLogout}){
       {showTradeModal&&selected&&allSigs[selected.ticker]&&(<TradeModal asset={selected} sig={allSigs[selected.ticker]} balance={balance} fmtMoney={fmtMoney} toLocal={toLocal} onPlace={placeTrade} onClose={()=>setShowTradeModal(false)}/>)}
       {showWatchModal&&selected&&allSigs[selected.ticker]&&(<WatchModal asset={selected} sig={allSigs[selected.ticker]} fmtMoney={fmtMoney} existingWatches={watchItems.filter(w=>w.ticker===selected.ticker)} onAdd={w=>setWatchItems(p=>[...p,w])} onClose={()=>setShowWatchModal(false)}/>)}
       {showProfileModal&&selected&&allSigs[selected.ticker]&&(<AssetProfileModal asset={selected} sig={allSigs[selected.ticker]} fmtMoney={fmtMoney} onClose={()=>setShowProfileModal(false)}/>)}
+      {/* Tutorial */}
+      {showTutorial&&<Tutorial onComplete={completeTutorial} onSkip={completeTutorial}/>}
+      {/* Help Page */}
+      {showHelp&&(<div style={{position:"fixed",inset:0,zIndex:550}}><HelpPage onClose={()=>setShowHelp(false)}/></div>)}
+      {/* Advice popup before trade */}
+      {advicePopup&&(<Modal onClose={()=>setAdvicePopup(null)} maxWidth={420}>
+        <div style={{background:"#0a0a16",borderBottom:"1px solid #ffd60033",padding:"12px 16px",borderRadius:"12px 12px 0 0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#ffd600",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:2}}>💡 BEFORE YOU TRADE</div>
+        </div>
+        <div style={{padding:"12px 16px"}}>
+          {advicePopup.items.map((a,i)=>(<div key={i} style={{display:"flex",gap:8,padding:"7px 0",borderBottom:"1px solid #0a0a14",alignItems:"flex-start"}}>
+            <span style={{fontSize:14,flexShrink:0}}>{a.icon}</span>
+            <span style={{fontSize:10,color:a.color||"#a0a0c0",lineHeight:1.7}}>{a.msg}</span>
+          </div>))}
+          <label style={{display:"flex",alignItems:"center",gap:8,marginTop:12,cursor:"pointer"}}>
+            <input type="checkbox" id="adv_dismiss" style={{accentColor:"#00b0ff"}}/>
+            <span style={{fontSize:9,color:"#4a4a6a"}}>Do not show pre-trade advice again</span>
+          </label>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
+            <button onClick={()=>setAdvicePopup(null)} style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:6,padding:"9px",color:"#4a4a6a",fontSize:9}}>RECONSIDER</button>
+            <button onClick={()=>{if(document.getElementById("adv_dismiss")?.checked)dismissPopup(POPUP_CATEGORIES.MODERATE_SIGNAL);advicePopup.onConfirm();}} style={{background:"#ffd60022",border:"1px solid #ffd600",borderRadius:6,padding:"9px",color:"#ffd600",fontSize:9,letterSpacing:1}}>PROCEED ANYWAY →</button>
+          </div>
+          <div style={{fontSize:7,color:"#1a1a28",textAlign:"center",marginTop:8}}>Virtual simulation only. Not financial advice.</div>
+        </div>
+      </Modal>)}
 
       {/* HEADER */}
       <div style={{borderBottom:"1px solid #0c0c18",padding:"7px 14px",display:"flex",alignItems:"center",gap:8,flexShrink:0,background:"#03030a",flexWrap:"wrap"}}>
@@ -1147,12 +1523,19 @@ function MainApp({user,onLogout}){
 
       {/* NAV */}
       <div style={{borderBottom:"1px solid #0c0c18",padding:"0 14px",display:"flex",flexShrink:0,background:"#04040c"}}>
-        {[["market","📊 Market"],["portfolio",`💼 Portfolio${openTrades.length>0?" ("+openTrades.length+")":""}`],["watchlist",`★ Watch${watchingCount>0?" ("+watchingCount+")":""}`],["accuracy","🎯 Accuracy"]].map(([v,l])=>(<button key={v} onClick={()=>setView(v)} style={{background:"transparent",border:"none",borderBottom:`2px solid ${view===v?"#00b0ff":"transparent"}`,padding:"9px 14px",color:view===v?"#00b0ff":"#3a3a55",fontSize:9,letterSpacing:1,whiteSpace:"nowrap"}}>{l}</button>))}
+        {[["market","📊 Market"],["portfolio",`💼 Portfolio${openTrades.length>0?" ("+openTrades.length+")":""}`],["watchlist",`★ Watch${watchingCount>0?" ("+watchingCount+")":""}`],["accuracy","🎯 Accuracy"],["help","❓ Help"]].map(([v,l])=>(<button key={v} onClick={()=>v==="help"?setShowHelp(true):setView(v)} style={{background:"transparent",border:"none",borderBottom:`2px solid ${view===v?"#00b0ff":"transparent"}`,padding:"9px 14px",color:view===v?"#00b0ff":"#3a3a55",fontSize:9,letterSpacing:1,whiteSpace:"nowrap"}}>{l}</button>))}
       </div>
 
       {/* MARKET */}
       {view==="market"&&(
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Session + Behaviour banners */}
+          {(visibleAlerts.length>0||true)&&(
+            <div style={{padding:"4px 12px 0",flexShrink:0}}>
+              <SessionBanner session={marketSession}/>
+              {visibleAlerts.slice(0,1).map(a=>(<BehaviourBanner key={a.cat} alerts={[a]} dismissed={sessionDismissed} onDismiss={dismissAlert}/>))}
+            </div>
+          )}
           <div style={{borderBottom:"1px solid #0c0c18",padding:"6px 12px",background:"#04040c",flexShrink:0}}>
             {/* Row 1: search + caps + vol + risk */}
             <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
@@ -1243,6 +1626,8 @@ function MainApp({user,onLogout}){
                   </div>
                 </div>
                 {inWatch&&<div style={{background:"#ffd60010",border:"1px solid #ffd60033",borderRadius:5,padding:"5px 8px",fontSize:8,color:"#ffd600"}}>★ Watching over {assetWatches.length} period{assetWatches.length>1?"s":""}</div>}
+                {/* Smart advice panel in detail view */}
+                {(()=>{const adv=getTradeAdvice(selected,sig,trades);const ins=getUserInsights(trades,watchItems,selected,sig);if(!adv.length&&!ins.length)return null;return(<SmartAdvicePanel adviceList={adv.slice(0,3)} userInsights={ins.slice(0,1)}/>);})()}
                 <div style={{background:"#0a0a16",borderRadius:6,padding:10}}>
                   <div style={{fontSize:7,color:"#2a2a40",letterSpacing:2,marginBottom:8}}>TIMEFRAME ALIGNMENT</div>
                   {TF_KEYS.map(k=>{const p=TF_PROFILES[k],sc=sig.tfScores[k];const pc=sc>=72?"#00e676":sc>=52?"#00d4ff":sc>=35?"#ffd600":"#ff6d00";return(<div key={k} style={{marginBottom:5}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><div style={{display:"flex",gap:4,alignItems:"center"}}><span style={{fontSize:9}}>{p.icon}</span><span style={{fontSize:8,color:sig.bestTF===k?p.color:"#5a5a7a",fontWeight:sig.bestTF===k?"700":"normal"}}>{p.short}</span>{sig.bestTF===k&&<Tag color={p.color} small>BEST</Tag>}</div><span style={{fontSize:9,color:pc,fontWeight:700,fontFamily:"monospace"}}>{sc.toFixed(0)}%</span></div><div style={{height:3,background:"#0e0e18",borderRadius:2,overflow:"hidden"}}><div style={{width:`${sc}%`,height:"100%",background:`linear-gradient(90deg,${pc}66,${pc})`,borderRadius:2}}/></div></div>);})}
@@ -1257,7 +1642,7 @@ function MainApp({user,onLogout}){
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
                   <button onClick={()=>setShowWatchModal(true)} style={{background:"#ffd60022",border:`1px solid ${inWatch?"#ffd60099":"#ffd600"}`,borderRadius:6,padding:"9px",color:"#ffd600",fontSize:9,letterSpacing:1}}>{inWatch?`★ WATCH AGAIN (${assetWatches.length})  `:"★ WATCH"}</button>
-                  <button onClick={()=>setShowTradeModal(true)} disabled={balance<toLocal(sig.price)} style={{background:balance>=toLocal(sig.price)?R.color+"22":"#1a1a2e",border:`1px solid ${balance>=toLocal(sig.price)?R.color:"#2a2a40"}`,borderRadius:6,padding:"9px",color:balance>=toLocal(sig.price)?R.color:"#3a3a50",fontSize:9,letterSpacing:1}}>📈 TRADE</button>
+                  <button onClick={()=>openTradeWithAdvice(selected,sig)} disabled={balance<toLocal(sig.price)} style={{background:balance>=toLocal(sig.price)?R.color+"22":"#1a1a2e",border:`1px solid ${balance>=toLocal(sig.price)?R.color:"#2a2a40"}`,borderRadius:6,padding:"9px",color:balance>=toLocal(sig.price)?R.color:"#3a3a50",fontSize:9,letterSpacing:1}}>📈 TRADE</button>
                 </div>
                 {hasProfile&&<button onClick={()=>setShowProfileModal(true)} style={{background:"#ffd60010",border:"1px solid #ffd60044",borderRadius:6,padding:"8px",color:"#ffd600",fontSize:9,letterSpacing:1}}>📋 VIEW ASSET PROFILE (PROS / CONS / ANALYSIS)</button>}
                 <div style={{fontSize:7,color:"#1a1a28",textAlign:"center"}}>Virtual simulation only. Not financial advice.</div>
@@ -1431,6 +1816,7 @@ function MainApp({user,onLogout}){
       <div style={{borderTop:"1px solid #0e0e18",padding:"3px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,background:"#03030a"}}>
         <span style={{fontSize:7,color:liveCount>0?"#00e676":"#3a3a50",animation:liveCount>0?"pulse 2s infinite":"none"}}>{liveCount>0?"● LIVE":"● SIM"}</span>
         <span style={{fontSize:7,color:"#2a2a40"}}>{liveCount} live · {ASSETS.length-liveCount} sim · {ASSETS.length} assets total</span>
+        <button onClick={()=>{localStorage.removeItem("mb_tutorial_done");setShowTutorial(true);}} style={{background:"none",border:"none",color:"#2a2a40",fontSize:7,cursor:"pointer"}}>restart tutorial</button>
         {lastUpdated&&<span style={{fontSize:7,color:"#1a1a28",marginLeft:"auto"}}>Updated {lastUpdated}</span>}
       </div>
     </div>
