@@ -24,7 +24,7 @@ from typing import Optional, List, Dict, Any
 
 log = logging.getLogger("mb-ingestion.db")
 
-DATABASE_PATH = os.environ.get("ASSET_DB_PATH", "market_brain_assets.db")
+DATABASE_PATH = os.environ.get("ASSET_DB_PATH", "/tmp/market_brain_assets.db")
 
 
 # ══════════════════════════════════════════════════════════════
