@@ -1,14 +1,22 @@
+"""
+Stock Price API - Production-Ready FastAPI Server
+Serves Market Brain UI + real-time Yahoo Finance prices
+"""
+
 import asyncio
 import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -54,6 +62,8 @@ async def get_redis() -> Optional[aioredis.Redis]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await get_redis()
+    # Create static dir if it doesn't exist
+    Path("static").mkdir(exist_ok=True)
     yield
     if redis_client:
         await redis_client.aclose()
@@ -61,7 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Stock Price API",
-    description="Real-time stock prices via Yahoo Finance. No API keys needed.",
+    description="Real-time stock prices via Yahoo Finance.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -209,11 +219,6 @@ async def get_price(symbol: str, client: httpx.AsyncClient) -> dict:
     }
 
 
-@app.get("/")
-async def root():
-    return {"status": "ok", "docs": "/docs", "api": "/api/price/AAPL"}
-
-
 @app.get("/health")
 async def health():
     r = await get_redis()
@@ -321,6 +326,21 @@ async def websocket_price(websocket: WebSocket, symbol: str):
         log.error(f"WS error for {symbol}: {e}")
     finally:
         manager.disconnect(websocket, symbol)
+
+
+# Mount static files + serve index.html at root
+# Must be registered AFTER all API routes
+static_dir = Path("static")
+static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    index = Path("static/index.html")
+    if index.exists():
+        return FileResponse(index)
+    return {"status": "ok", "docs": "/docs"}
 
 
 if __name__ == "__main__":
