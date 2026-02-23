@@ -1,0 +1,5 @@
+# Market Brain — Ingestion Bot Dependencies
+# Install with: pip install -r requirements-ingestion.txt
+
+httpx>=0.27.0
+aiosqlite>=0.20.0
