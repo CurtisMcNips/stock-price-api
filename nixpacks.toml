@@ -1,0 +1,11 @@
+[start]
+cmd = "uvicorn app:app --host 0.0.0.0 --port $PORT"
+```
+
+And double-check your 4 files look exactly like this in GitHub:
+```
+your-repo/
+├── app.py
+├── requirements.txt        ← fastapi, uvicorn[standard], httpx, redis[asyncio]
+├── Procfile                ← web: uvicorn app:app --host 0.0.0.0 --port $PORT
+└── runtime.txt             ← python-3.11
