@@ -1,1 +1,1 @@
-worker: python ingestion_engine/ingestion_engine.py --mode schedule
+worker: python ingestion_engine.py --mode schedule
