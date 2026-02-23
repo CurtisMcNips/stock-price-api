@@ -3,3 +3,7 @@ uvicorn[standard]
 httpx
 redis[asyncio]
 aiofiles
+redis
+anthropic
+apscheduler
+python-dotenv
