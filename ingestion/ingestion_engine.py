@@ -28,10 +28,10 @@ from database import (
     get_asset, start_run, complete_run, get_recent_runs, get_universe_summary,
     get_pending_notifications, mark_notifications_processed,
 )
-from ingestion.classifiers import (
+from classifiers import (
     classify_asset, is_liquid_enough, is_allowed_exchange, normalise_ticker
 )
-from ingestion.fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
+from fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
 
 logging.basicConfig(
     level=logging.INFO,
