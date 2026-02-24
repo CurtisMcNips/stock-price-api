@@ -17,7 +17,7 @@ import logging
 import os
 import time
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 import httpx
 
@@ -121,7 +121,6 @@ async def _push_assets_async(assets: List[dict]) -> Dict[str, int]:
         seen[a["ticker"]] = a
     deduped = list(seen.values())
 
-    # Update in-memory ticker set
     for a in deduped:
         _active_tickers[a["ticker"]] = a
 
@@ -152,10 +151,7 @@ def init_db() -> None:
 
 
 def upsert_asset(asset: dict, run_id: str = "", source: str = "") -> str:
-    """
-    Upsert one asset. Returns 'added' or 'updated'.
-    Collects assets into a batch; call flush_pending() to push.
-    """
+    """Buffer one asset in memory. Flushed to main app at end of run."""
     ticker = (asset.get("ticker") or "").upper().strip()
     if not ticker:
         return "skipped"
@@ -163,7 +159,6 @@ def upsert_asset(asset: dict, run_id: str = "", source: str = "") -> str:
     action = "updated" if ticker in _active_tickers else "added"
     _active_tickers[ticker] = {**asset, "ticker": ticker}
 
-    # Queue a notification
     _pending_notifications.append({
         "id":         str(uuid.uuid4()),
         "event_type": "asset_added" if action == "added" else "asset_updated",
@@ -175,22 +170,16 @@ def upsert_asset(asset: dict, run_id: str = "", source: str = "") -> str:
     return action
 
 
-def flush_pending() -> None:
-    """Push all buffered upserts to the main app in one shot."""
+async def flush_pending() -> None:
+    """Await this to push all buffered assets to the main app."""
     if not _active_tickers:
         return
     assets = list(_active_tickers.values())
-    try:
-        result = asyncio.run(_push_assets_async(assets))
-        log.info(f"flush_pending: {result}")
-    except RuntimeError:
-        # Already inside an event loop
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(_push_assets_async(assets))
+    result = await _push_assets_async(assets)
+    log.info(f"flush_pending: {result}")
 
 
 def get_all_active_tickers() -> List[str]:
-    """Return in-memory ticker list (populated during this run)."""
     return list(_active_tickers.keys())
 
 
@@ -199,14 +188,13 @@ def get_asset(ticker: str) -> Optional[dict]:
 
 
 def deactivate_asset(ticker: str, run_id: str = "", source: str = "", reason: str = "") -> None:
-    """Remove from in-memory set. Main app will drop it on next /api/universe call."""
     ticker = ticker.upper()
     if ticker in _active_tickers:
         del _active_tickers[ticker]
         log.info(f"Deactivated {ticker}: {reason}")
 
 
-# ── Run tracking (lightweight in-memory) ──────────────────────
+# ── Run tracking ──────────────────────────────────────────────
 def start_run(run_id: str, source: str) -> None:
     _runs.append({
         "run_id":      run_id,
@@ -219,7 +207,7 @@ def start_run(run_id: str, source: str) -> None:
     })
 
 
-def complete_run(run_id: str, stats: dict, status: str = "completed") -> None:
+async def complete_run(run_id: str, stats: dict, status: str = "completed") -> None:
     for r in _runs:
         if r["run_id"] == run_id:
             r.update({
@@ -230,8 +218,7 @@ def complete_run(run_id: str, stats: dict, status: str = "completed") -> None:
                 "deactivated":  stats.get("deactivated", 0),
             })
             break
-    # Push all buffered assets now that the run is done
-    flush_pending()
+    await flush_pending()
 
 
 def get_recent_runs(limit: int = 5) -> List[dict]:
@@ -239,7 +226,7 @@ def get_recent_runs(limit: int = 5) -> List[dict]:
 
 
 def get_universe_summary() -> dict:
-    by_type   = {}
+    by_type = {}
     by_sector = {}
     for a in _active_tickers.values():
         t = a.get("asset_type", "unknown")
@@ -254,7 +241,7 @@ def get_universe_summary() -> dict:
     }
 
 
-# ── Notifications (engine_engine.py uses these) ───────────────
+# ── Notifications ─────────────────────────────────────────────
 def get_pending_notifications(limit: int = 200) -> List[dict]:
     unprocessed = [n for n in _pending_notifications if not n["processed"]]
     return unprocessed[:limit]
