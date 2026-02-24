@@ -3,15 +3,14 @@ Market Brain — Data Fetchers
 ─────────────────────────────
 Fetchers pull raw asset data from external APIs.
 They return normalised dicts. They do NOT write to the database.
-The ingestion engine calls fetchers, classifies results, then writes.
 
 Sources:
-  - Yahoo Finance  (equities, ETFs, indices, forex)
+  - Yahoo Finance  (equities, ETFs, indices, forex) — uses v8/chart only
   - CoinGecko      (crypto — free tier, no key needed)
   - Static seeds   (fallback / manual additions)
 
-Adding a new source: implement a class with a fetch() method
-that returns List[dict] with the raw fields listed in FIELD_SPEC.
+NOTE: Yahoo's v10/quoteSummary endpoint now requires auth (401).
+      We use only the v8/chart endpoint which still works freely.
 """
 
 import asyncio
@@ -25,7 +24,7 @@ log = logging.getLogger("mb-ingestion.fetchers")
 
 REQUEST_TIMEOUT = 12
 RETRY_ATTEMPTS  = 3
-RETRY_DELAY     = 2.0   # seconds between retries
+RETRY_DELAY     = 2.0
 
 YAHOO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -33,8 +32,6 @@ YAHOO_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# ── FIELD SPEC ─────────────────────────────────────────────────
-# All fetchers should attempt to return these fields (all optional except ticker)
 FIELD_SPEC = [
     "ticker", "name", "quote_type", "exchange", "currency", "country",
     "sector", "industry", "market_cap", "price", "change_pct",
@@ -57,9 +54,12 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict = None,
                 return r.json()
             if r.status_code == 429:
                 wait = RETRY_DELAY * (attempt + 1) * 2
-                log.warning(f"Rate limited by {url[:40]}... waiting {wait}s")
+                log.warning(f"Rate limited — waiting {wait}s")
                 await asyncio.sleep(wait)
                 continue
+            if r.status_code == 401:
+                log.warning(f"HTTP 401 (auth required) — skipping {url[:60]}")
+                return None
             log.warning(f"HTTP {r.status_code} from {url[:60]}")
         except httpx.TimeoutException:
             log.warning(f"Timeout (attempt {attempt+1}): {url[:60]}")
@@ -75,52 +75,13 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict = None,
 # ══════════════════════════════════════════════════════════════
 class YahooFetcher:
     """
-    Fetches asset metadata from Yahoo Finance.
-    No API key required.
-    Rate limit: ~2000 requests/hour on the v1 endpoint.
+    Fetches asset data from Yahoo Finance using only the v8/chart endpoint.
+    The v10/quoteSummary endpoint now requires authentication and is not used.
     """
 
-    BASE_SCREENER  = "https://query1.finance.yahoo.com/v1/finance/screener"
-    BASE_QUOTE     = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-    BASE_QUOTETYPE = "https://query1.finance.yahoo.com/v1/finance/quoteType/{symbol}"
-    BASE_SUMMARY   = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
-
-    # Yahoo screener presets
-    SCREENER_QUERIES = {
-        "us_large_cap": {
-            "offset": 0, "size": 250,
-            "sortField": "marketcap", "sortType": "DESC",
-            "quoteType": "EQUITY", "region": "us",
-            "filters": [{"field":"marketcap","operator":"GT","value":10_000_000_000}]
-        },
-        "us_mid_cap": {
-            "offset": 0, "size": 250,
-            "sortField": "marketcap", "sortType": "DESC",
-            "quoteType": "EQUITY", "region": "us",
-            "filters": [
-                {"field":"marketcap","operator":"GT","value":2_000_000_000},
-                {"field":"marketcap","operator":"LT","value":10_000_000_000},
-            ]
-        },
-        "us_small_cap": {
-            "offset": 0, "size": 250,
-            "sortField": "marketcap", "sortType": "DESC",
-            "quoteType": "EQUITY", "region": "us",
-            "filters": [
-                {"field":"marketcap","operator":"GT","value":300_000_000},
-                {"field":"marketcap","operator":"LT","value":2_000_000_000},
-            ]
-        },
-    }
-
-    # Static lists for asset classes Yahoo doesn't screener well
-    CRYPTO_TICKERS = [
-        "BTC-USD","ETH-USD","BNB-USD","SOL-USD","XRP-USD","ADA-USD",
-        "AVAX-USD","DOGE-USD","DOT-USD","MATIC-USD","LTC-USD","LINK-USD",
-        "ATOM-USD","UNI-USD","ICP-USD","FIL-USD","APT-USD","ARB-USD",
-        "OP-USD","SUI-USD","INJ-USD","NEAR-USD","TIA-USD","SEI-USD",
-        "RUNE-USD","ALGO-USD","EGLD-USD","XMR-USD","ETC-USD","HBAR-USD",
-    ]
+    # v8/chart works without auth — this is our only Yahoo endpoint
+    BASE_QUOTE = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    BASE_QUOTE_FALLBACK = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
 
     FOREX_TICKERS = [
         "EURUSD=X","GBPUSD=X","USDJPY=X","USDCHF=X","AUDUSD=X",
@@ -155,74 +116,46 @@ class YahooFetcher:
     ]
 
     async def fetch_quote(self, client: httpx.AsyncClient, ticker: str) -> Optional[dict]:
-        """Fetch full quote for a single ticker."""
-        url = self.BASE_QUOTE.format(symbol=ticker)
-        data = await _get(client, url)
-        if not data:
-            return None
-        try:
-            result = data.get("chart", {}).get("result", [])
-            if not result:
-                return None
-            meta = result[0].get("meta", {})
-            price = meta.get("regularMarketPrice") or meta.get("previousClose")
-            if not price:
-                return None
-            return {
-                "ticker":              ticker,
-                "name":                meta.get("shortName") or meta.get("longName") or ticker,
-                "quote_type":          meta.get("instrumentType") or meta.get("quoteType"),
-                "exchange":            meta.get("exchangeName"),
-                "currency":            meta.get("currency", "USD"),
-                "price":               round(float(price), 4),
-                "change_pct":          None,
-                "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low":  meta.get("fiftyTwoWeekLow"),
-                "avg_volume_30d":      meta.get("regularMarketVolume"),
-                "market_cap":          meta.get("marketCap"),
-                "source":              "yahoo_finance",
-            }
-        except Exception as e:
-            log.warning(f"Parse error for {ticker}: {e}")
-            return None
+        """Fetch quote for a single ticker using v8/chart endpoint only."""
+        for url_template in [self.BASE_QUOTE, self.BASE_QUOTE_FALLBACK]:
+            url = url_template.format(symbol=ticker)
+            data = await _get(client, url)
+            if not data:
+                continue
+            try:
+                result = data.get("chart", {}).get("result", [])
+                if not result:
+                    continue
+                meta = result[0].get("meta", {})
+                price = meta.get("regularMarketPrice") or meta.get("previousClose")
+                if not price:
+                    continue
 
-    async def fetch_summary(self, client: httpx.AsyncClient, ticker: str) -> Optional[dict]:
-        """Fetch detailed fundamentals (sector, beta, PE etc)."""
-        url = self.BASE_SUMMARY.format(symbol=ticker)
-        data = await _get(client, url, params={
-            "modules": "summaryProfile,defaultKeyStatistics,summaryDetail,price"
-        })
-        if not data:
-            return None
-        try:
-            result = data.get("quoteSummary", {}).get("result", [{}])[0]
-            profile  = result.get("summaryProfile", {})
-            stats    = result.get("defaultKeyStatistics", {})
-            summary  = result.get("summaryDetail", {})
-            price_m  = result.get("price", {})
+                prev_close = meta.get("previousClose") or meta.get("chartPreviousClose") or price
+                change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0
 
-            def val(d, k): return d.get(k, {}).get("raw") if isinstance(d.get(k), dict) else d.get(k)
-
-            return {
-                "sector":           profile.get("sector"),
-                "industry":         profile.get("industry"),
-                "country":          profile.get("country", "US"),
-                "market_cap":       val(price_m, "marketCap") or val(summary, "marketCap"),
-                "avg_volume_30d":   val(summary, "averageVolume"),
-                "beta":             val(summary, "beta"),
-                "pe_ratio":         val(summary, "trailingPE"),
-                "fifty_two_week_high": val(summary, "fiftyTwoWeekHigh"),
-                "fifty_two_week_low":  val(summary, "fiftyTwoWeekLow"),
-                "short_ratio":      val(stats, "shortRatio"),
-            }
-        except Exception as e:
-            log.warning(f"Summary parse error for {ticker}: {e}")
-            return None
+                return {
+                    "ticker":              ticker,
+                    "name":                meta.get("shortName") or meta.get("longName") or ticker,
+                    "quote_type":          meta.get("instrumentType") or meta.get("quoteType"),
+                    "exchange":            meta.get("exchangeName"),
+                    "currency":            meta.get("currency", "USD"),
+                    "price":               round(float(price), 4),
+                    "change_pct":          round(float(change_pct), 4),
+                    "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
+                    "fifty_two_week_low":  meta.get("fiftyTwoWeekLow"),
+                    "avg_volume_30d":      meta.get("regularMarketVolume"),
+                    "market_cap":          meta.get("marketCap"),
+                    "source":              "yahoo_finance",
+                }
+            except Exception as e:
+                log.warning(f"Parse error for {ticker}: {e}")
+                continue
+        return None
 
     async def fetch_tickers_batch(
         self,
         tickers: List[str],
-        include_summary: bool = False,
         concurrency: int = 5,
     ) -> List[dict]:
         """Fetch a list of tickers with controlled concurrency."""
@@ -233,13 +166,7 @@ class YahooFetcher:
             async with sem:
                 async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                     quote = await self.fetch_quote(client, ticker)
-                    if not quote:
-                        return None
-                    if include_summary:
-                        summary = await self.fetch_summary(client, ticker)
-                        if summary:
-                            quote.update({k: v for k, v in summary.items() if v is not None})
-                    await asyncio.sleep(0.2)  # gentle rate limiting
+                    await asyncio.sleep(0.2)
                     return quote
 
         tasks = [fetch_one(t) for t in tickers]
@@ -251,36 +178,31 @@ class YahooFetcher:
                 log.warning(f"Fetch error: {r}")
         return results
 
-    async def fetch_crypto(self) -> List[dict]:
-        log.info(f"Fetching {len(self.CRYPTO_TICKERS)} crypto tickers from Yahoo")
-        return await self.fetch_tickers_batch(self.CRYPTO_TICKERS, include_summary=False)
-
     async def fetch_forex(self) -> List[dict]:
         log.info(f"Fetching {len(self.FOREX_TICKERS)} forex pairs from Yahoo")
-        return await self.fetch_tickers_batch(self.FOREX_TICKERS, include_summary=False)
+        return await self.fetch_tickers_batch(self.FOREX_TICKERS)
 
     async def fetch_commodities(self) -> List[dict]:
         log.info(f"Fetching {len(self.COMMODITY_TICKERS)} commodity tickers from Yahoo")
-        return await self.fetch_tickers_batch(self.COMMODITY_TICKERS, include_summary=False)
+        return await self.fetch_tickers_batch(self.COMMODITY_TICKERS)
 
     async def fetch_etfs(self) -> List[dict]:
         log.info(f"Fetching {len(self.ETF_TICKERS)} ETF tickers from Yahoo")
-        return await self.fetch_tickers_batch(self.ETF_TICKERS, include_summary=True, concurrency=3)
+        return await self.fetch_tickers_batch(self.ETF_TICKERS, concurrency=3)
 
     async def fetch_equities_screener(self, query_name: str = "us_large_cap") -> List[dict]:
         """
-        Use Yahoo's screener to pull equities by cap tier.
-        Returns up to 250 results per call.
+        Yahoo screener for equities — may or may not work without auth.
+        Falls back to empty list gracefully if blocked.
         """
-        query = self.SCREENER_QUERIES.get(query_name, self.SCREENER_QUERIES["us_large_cap"])
-        log.info(f"Screener: {query_name}")
+        log.info(f"Attempting Yahoo screener: {query_name}")
         async with httpx.AsyncClient(timeout=15) as client:
-            data = await _get(client, self.BASE_SCREENER,
+            data = await _get(client,
+                              "https://query1.finance.yahoo.com/v1/finance/screener",
                               params={"formatted": "false", "lang": "en-US", "region": "US"},
                               headers=YAHOO_HEADERS)
         if not data:
-            # Screener endpoint is less reliable — fall back to known list
-            log.warning("Yahoo screener unavailable — using fallback ticker list")
+            log.warning("Yahoo screener unavailable — skipping")
             return []
 
         try:
@@ -315,13 +237,12 @@ class YahooFetcher:
 
 
 # ══════════════════════════════════════════════════════════════
-# COINGECKO FETCHER (crypto — no API key)
+# COINGECKO FETCHER
 # ══════════════════════════════════════════════════════════════
 class CoinGeckoFetcher:
     """
     Free CoinGecko API — no key needed.
     Rate limit: 10-30 calls/minute on free tier.
-    Returns top N coins by market cap.
     """
     BASE = "https://api.coingecko.com/api/v3"
 
@@ -346,14 +267,13 @@ class CoinGeckoFetcher:
                 for coin in data:
                     symbol = coin.get("symbol", "").upper()
                     ticker = f"{symbol}-USD"
-                    market_cap = coin.get("market_cap")
                     results.append({
                         "ticker":          ticker,
                         "name":            coin.get("name", symbol),
                         "quote_type":      "CRYPTOCURRENCY",
                         "sector":          "Crypto",
                         "currency":        "USD",
-                        "market_cap":      market_cap,
+                        "market_cap":      coin.get("market_cap"),
                         "price":           coin.get("current_price"),
                         "change_pct":      coin.get("price_change_percentage_24h"),
                         "avg_volume_30d":  coin.get("total_volume"),
@@ -365,7 +285,7 @@ class CoinGeckoFetcher:
 
                 if len(data) < 100:
                     break
-                await asyncio.sleep(2)  # CoinGecko rate limit
+                await asyncio.sleep(2)
 
         return results[:limit]
 
@@ -376,8 +296,7 @@ class CoinGeckoFetcher:
 class StaticSeedFetcher:
     """
     Manually curated asset list.
-    Used for assets that screeners miss or for initial bootstrapping.
-    Edit SEEDS to add/remove manually curated assets.
+    These bypass the liquidity filter as they are pre-vetted.
     """
 
     SEEDS = [
