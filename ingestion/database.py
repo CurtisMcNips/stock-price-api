@@ -1,441 +1,153 @@
 """
-Market Brain — Asset Database
-─────────────────────────────
-SQLite-backed asset universe store.
-SQLite chosen for Railway compatibility with zero config.
-Swap DATABASE_URL to PostgreSQL for production scale.
+Market Brain — Ingestion Database Layer
+────────────────────────────────────────
+Previously wrote assets to SQLite.
+Now POSTs directly to the main app via /api/ingest.
 
-Tables:
-  assets           — canonical asset universe
-  asset_metadata   — flexible key/value extension
-  ingestion_logs   — immutable audit trail
-  sectors          — sector reference data
-  ingestion_runs   — per-run summary records
+The main app stores assets in Redis, and /api/universe reads from there.
+
+Environment variables expected:
+  MB_API_URL     — e.g. https://web-production-db367d.up.railway.app
+  INGEST_API_KEY — e.g. mb-ingest-secret
 """
 
-import sqlite3
-import json
+import asyncio
 import logging
 import os
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import List, Dict
 
-log = logging.getLogger("mb-ingestion.db")
+import httpx
 
-# /tmp is writable on Railway — the default path without /tmp will fail
-DATABASE_PATH = os.environ.get("ASSET_DB_PATH", "/tmp/market_brain_assets.db")
+log = logging.getLogger("mb-ingestion.database")
 
+MB_API_URL     = os.environ.get("MB_API_URL", "").rstrip("/")
+INGEST_API_KEY = os.environ.get("INGEST_API_KEY", "mb-ingest-secret")
 
-# ══════════════════════════════════════════════════════════════
-# CONNECTION
-# ══════════════════════════════════════════════════════════════
-def get_connection() -> sqlite3.Connection:
-    Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
-
-@contextmanager
-def db():
-    conn = get_connection()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+INGEST_ENDPOINT = f"{MB_API_URL}/api/ingest"
+BATCH_SIZE      = 50
+REQUEST_TIMEOUT = 30
+RETRY_ATTEMPTS  = 3
+RETRY_DELAY     = 3.0
 
 
 # ══════════════════════════════════════════════════════════════
-# SCHEMA
+# NORMALISATION
 # ══════════════════════════════════════════════════════════════
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS sectors (
-    sector          TEXT PRIMARY KEY,
-    description     TEXT,
-    etf_proxy       TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
+def _infer_asset_type(asset: dict) -> str:
+    quote_type = (asset.get("quote_type") or "").upper()
+    source     = (asset.get("source") or "").lower()
+    ticker     = (asset.get("ticker") or "").upper()
+    sector     = (asset.get("sector") or "").lower()
 
-CREATE TABLE IF NOT EXISTS assets (
-    ticker          TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    asset_type      TEXT NOT NULL,
-    sector          TEXT,
-    industry        TEXT,
-    exchange        TEXT,
-    country         TEXT DEFAULT 'US',
-    currency        TEXT DEFAULT 'USD',
-    market_cap      REAL,
-    market_cap_tier TEXT,
-    volatility_tier TEXT,
-    active          INTEGER NOT NULL DEFAULT 1,
-    tradeable       INTEGER NOT NULL DEFAULT 1,
-    price_last      REAL,
-    price_52w_high  REAL,
-    price_52w_low   REAL,
-    avg_volume_30d  REAL,
-    first_seen      TEXT NOT NULL DEFAULT (datetime('now')),
-    last_updated    TEXT NOT NULL DEFAULT (datetime('now')),
-    last_active     TEXT,
-    source          TEXT,
-    source_id       TEXT,
-    FOREIGN KEY (sector) REFERENCES sectors(sector)
-);
-
-CREATE INDEX IF NOT EXISTS idx_assets_sector    ON assets(sector);
-CREATE INDEX IF NOT EXISTS idx_assets_type      ON assets(asset_type);
-CREATE INDEX IF NOT EXISTS idx_assets_active    ON assets(active);
-CREATE INDEX IF NOT EXISTS idx_assets_cap_tier  ON assets(market_cap_tier);
-
-CREATE TABLE IF NOT EXISTS asset_metadata (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker          TEXT NOT NULL,
-    key             TEXT NOT NULL,
-    value           TEXT,
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (ticker) REFERENCES assets(ticker),
-    UNIQUE(ticker, key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_meta_ticker ON asset_metadata(ticker);
-CREATE INDEX IF NOT EXISTS idx_meta_key    ON asset_metadata(key);
-
-CREATE TABLE IF NOT EXISTS ingestion_logs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
-    run_id          TEXT,
-    action          TEXT NOT NULL,
-    ticker          TEXT,
-    asset_type      TEXT,
-    details         TEXT,
-    source          TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_logs_ticker    ON ingestion_logs(ticker);
-CREATE INDEX IF NOT EXISTS idx_logs_action    ON ingestion_logs(action);
-CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON ingestion_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_logs_run_id    ON ingestion_logs(run_id);
-
-CREATE TABLE IF NOT EXISTS ingestion_runs (
-    run_id          TEXT PRIMARY KEY,
-    started_at      TEXT NOT NULL,
-    completed_at    TEXT,
-    status          TEXT NOT NULL DEFAULT 'running',
-    source          TEXT,
-    total_fetched   INTEGER DEFAULT 0,
-    added           INTEGER DEFAULT 0,
-    updated         INTEGER DEFAULT 0,
-    deactivated     INTEGER DEFAULT 0,
-    skipped         INTEGER DEFAULT 0,
-    errors          INTEGER DEFAULT 0,
-    notes           TEXT
-);
-
-CREATE TABLE IF NOT EXISTS engine_notifications (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    event_type      TEXT NOT NULL,
-    ticker          TEXT NOT NULL,
-    payload         TEXT,
-    processed       INTEGER DEFAULT 0,
-    processed_at    TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_notif_processed ON engine_notifications(processed);
-"""
-
-SEED_SECTORS = [
-    ("Technology",   "Software, semiconductors, hardware, cloud, AI",      "XLK"),
-    ("Healthcare",   "Pharma, biotech, medtech, health services",           "XLV"),
-    ("Finance",      "Banking, insurance, fintech, asset management",       "XLF"),
-    ("Energy",       "Oil & gas, renewables, utilities",                    "XLE"),
-    ("Consumer",     "Retail, e-commerce, media, autos, apparel",          "XLY"),
-    ("Industrials",  "Aerospace, defence, manufacturing, logistics",        "XLI"),
-    ("Materials",    "Metals, mining, chemicals, forestry",                 "XLB"),
-    ("Crypto",       "Digital assets, blockchain, DeFi",                    None),
-    ("Forex",        "Currency pairs",                                       None),
-    ("Commodities",  "Oil, gas, gold, silver, agricultural",                "DJP"),
-    ("Space",        "Satellite, launch, defence tech",                     None),
-    ("Real Estate",  "REITs, property development",                         "XLRE"),
-    ("Utilities",    "Electric, water, gas utilities",                      "XLU"),
-    ("Agriculture",  "Farming, food production, fertilisers",               "MOO"),
-]
+    if source == "coingecko" or quote_type == "CRYPTOCURRENCY" or sector == "crypto":
+        return "crypto"
+    if quote_type == "ETF" or source == "yahoo_etf":
+        return "etf"
+    if "=X" in ticker or quote_type == "CURRENCY":
+        return "forex"
+    if "=F" in ticker or quote_type == "FUTURE":
+        return "commodity"
+    return "equity"
 
 
-def init_db():
-    """Initialise database — safe to call on every startup."""
-    with db() as conn:
-        conn.executescript(SCHEMA)
-        for sector, desc, etf in SEED_SECTORS:
-            conn.execute(
-                "INSERT OR IGNORE INTO sectors(sector, description, etf_proxy) VALUES (?,?,?)",
-                (sector, desc, etf)
-            )
-    log.info(f"Database initialised: {DATABASE_PATH}")
-
-
-# ══════════════════════════════════════════════════════════════
-# ASSET CRUD
-# ══════════════════════════════════════════════════════════════
-def upsert_asset(asset: dict, run_id: str, source: str) -> str:
-    """
-    Insert or update an asset. Returns action taken.
-    Never deletes — only deactivates.
-    """
-    ticker = asset["ticker"].upper().strip()
-    now = datetime.now(timezone.utc).isoformat()
-
-    with db() as conn:
-        existing = conn.execute(
-            "SELECT * FROM assets WHERE ticker = ?", (ticker,)
-        ).fetchone()
-
-        if existing is None:
-            conn.execute("""
-                INSERT INTO assets (
-                    ticker, name, asset_type, sector, industry, exchange,
-                    country, currency, market_cap, market_cap_tier,
-                    volatility_tier, active, tradeable, price_last,
-                    price_52w_high, price_52w_low, avg_volume_30d,
-                    first_seen, last_updated, last_active, source, source_id
-                ) VALUES (
-                    :ticker,:name,:asset_type,:sector,:industry,:exchange,
-                    :country,:currency,:market_cap,:market_cap_tier,
-                    :volatility_tier,:active,:tradeable,:price_last,
-                    :price_52w_high,:price_52w_low,:avg_volume_30d,
-                    :now,:now,:now,:source,:source_id
-                )
-            """, {**asset, "ticker": ticker, "now": now,
-                  "active": 1, "tradeable": 1,
-                  "source": source, "source_id": asset.get("source_id")})
-
-            _log(conn, run_id, "added", ticker, asset.get("asset_type"), source,
-                 {"name": asset.get("name"), "sector": asset.get("sector")})
-
-            # ── FIX: send FULL asset record in notification payload ──
-            _notify(conn, "asset_added", ticker, {
-                "name":           asset.get("name", ticker),
-                "asset_type":     asset.get("asset_type", "equity"),
-                "sector":         asset.get("sector"),
-                "industry":       asset.get("industry"),
-                "exchange":       asset.get("exchange"),
-                "country":        asset.get("country", "US"),
-                "currency":       asset.get("currency", "USD"),
-                "market_cap":     asset.get("market_cap"),
-                "cap_tier":       asset.get("market_cap_tier"),
-                "volatility_tier": asset.get("volatility_tier"),
-                "price_last":     asset.get("price_last"),
-                "tags":           [],
-            })
-            return "added"
-
-        else:
-            changed_fields = {}
-            for field in ["name", "sector", "industry", "market_cap", "market_cap_tier",
-                          "volatility_tier", "price_last", "price_52w_high", "price_52w_low",
-                          "avg_volume_30d", "exchange", "currency"]:
-                new_val = asset.get(field)
-                old_val = existing[field] if field in existing.keys() else None
-                if new_val is not None and new_val != old_val:
-                    changed_fields[field] = {"old": old_val, "new": new_val}
-
-            conn.execute("""
-                UPDATE assets SET
-                    name=COALESCE(:name, name),
-                    sector=COALESCE(:sector, sector),
-                    industry=COALESCE(:industry, industry),
-                    market_cap=COALESCE(:market_cap, market_cap),
-                    market_cap_tier=COALESCE(:market_cap_tier, market_cap_tier),
-                    volatility_tier=COALESCE(:volatility_tier, volatility_tier),
-                    price_last=COALESCE(:price_last, price_last),
-                    price_52w_high=COALESCE(:price_52w_high, price_52w_high),
-                    price_52w_low=COALESCE(:price_52w_low, price_52w_low),
-                    avg_volume_30d=COALESCE(:avg_volume_30d, avg_volume_30d),
-                    active=1, last_updated=:now, last_active=:now
-                WHERE ticker=:ticker
-            """, {**asset, "ticker": ticker, "now": now})
-
-            if changed_fields:
-                _log(conn, run_id, "updated", ticker, asset.get("asset_type"), source,
-                     {"changes": changed_fields})
-                if "sector" in changed_fields:
-                    _notify(conn, "sector_changed", ticker, changed_fields["sector"])
-                if "volatility_tier" in changed_fields:
-                    _notify(conn, "metadata_changed", ticker,
-                            {"volatility_tier": changed_fields["volatility_tier"]})
-
-                # Also send asset_updated with full record so app stays in sync
-                _notify(conn, "asset_updated", ticker, {
-                    "name":       asset.get("name", ticker),
-                    "asset_type": asset.get("asset_type", "equity"),
-                    "sector":     asset.get("sector"),
-                    "exchange":   asset.get("exchange"),
-                    "cap_tier":   asset.get("market_cap_tier"),
-                    "tags":       [],
-                })
-
-            return "updated"
-
-
-def deactivate_asset(ticker: str, run_id: str, source: str, reason: str = "delisted"):
-    now = datetime.now(timezone.utc).isoformat()
-    with db() as conn:
-        conn.execute(
-            "UPDATE assets SET active=0, last_updated=? WHERE ticker=?",
-            (now, ticker)
-        )
-        _log(conn, run_id, "deactivated", ticker, None, source, {"reason": reason})
-        _notify(conn, "asset_deactivated", ticker, {"reason": reason})
-    log.info(f"Deactivated: {ticker} ({reason})")
-
-
-def reactivate_asset(ticker: str, run_id: str, source: str):
-    now = datetime.now(timezone.utc).isoformat()
-    with db() as conn:
-        conn.execute(
-            "UPDATE assets SET active=1, last_updated=?, last_active=? WHERE ticker=?",
-            (now, now, ticker)
-        )
-        _log(conn, run_id, "reactivated", ticker, None, source, {})
-        _notify(conn, "asset_added", ticker, {"reactivated": True})
-
-
-def set_metadata(ticker: str, key: str, value: Any):
-    now = datetime.now(timezone.utc).isoformat()
-    val_str = json.dumps(value) if not isinstance(value, str) else value
-    with db() as conn:
-        conn.execute("""
-            INSERT INTO asset_metadata(ticker, key, value, updated_at)
-            VALUES(?,?,?,?)
-            ON CONFLICT(ticker,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-        """, (ticker, key, val_str, now))
-
-
-def get_all_active_tickers() -> List[str]:
-    with db() as conn:
-        rows = conn.execute("SELECT ticker FROM assets WHERE active=1").fetchall()
-    return [r["ticker"] for r in rows]
-
-
-def get_asset(ticker: str) -> Optional[Dict]:
-    with db() as conn:
-        row = conn.execute("SELECT * FROM assets WHERE ticker=?", (ticker.upper(),)).fetchone()
-    return dict(row) if row else None
-
-
-def get_assets(
-    asset_type: Optional[str] = None,
-    sector: Optional[str] = None,
-    active_only: bool = True,
-    cap_tier: Optional[str] = None,
-) -> List[Dict]:
-    query = "SELECT * FROM assets WHERE 1=1"
-    params = []
-    if active_only:       query += " AND active=1"
-    if asset_type:        query += " AND asset_type=?";      params.append(asset_type)
-    if sector:            query += " AND sector=?";          params.append(sector)
-    if cap_tier:          query += " AND market_cap_tier=?"; params.append(cap_tier)
-    with db() as conn:
-        rows = conn.execute(query, params).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_universe_summary() -> Dict:
-    with db() as conn:
-        total    = conn.execute("SELECT COUNT(*) FROM assets WHERE active=1").fetchone()[0]
-        by_type  = conn.execute("SELECT asset_type, COUNT(*) as n FROM assets WHERE active=1 GROUP BY asset_type").fetchall()
-        by_sec   = conn.execute("SELECT sector, COUNT(*) as n FROM assets WHERE active=1 GROUP BY sector").fetchall()
-        inactive = conn.execute("SELECT COUNT(*) FROM assets WHERE active=0").fetchone()[0]
+def _normalise(asset: dict) -> dict:
+    ticker = asset.get("ticker", "").upper().strip()
     return {
-        "total_active":   total,
-        "total_inactive": inactive,
-        "by_type":   {r["asset_type"]: r["n"] for r in by_type},
-        "by_sector": {r["sector"]: r["n"] for r in by_sec if r["sector"]},
+        "ticker":          ticker,
+        "name":            asset.get("name") or ticker,
+        "asset_type":      _infer_asset_type(asset),
+        "sector":          asset.get("sector"),
+        "industry":        asset.get("industry"),
+        "exchange":        asset.get("exchange"),
+        "country":         asset.get("country", "US"),
+        "currency":        asset.get("currency", "USD"),
+        "market_cap":      asset.get("market_cap"),
+        "cap_tier":        asset.get("cap_tier") or asset.get("market_cap_tier"),
+        "volatility_tier": asset.get("volatility_tier"),
+        "price_last":      asset.get("price") or asset.get("price_last"),
+        "change_pct":      asset.get("change_pct"),
+        "avg_volume_30d":  asset.get("avg_volume_30d"),
+        "source":          asset.get("source", "unknown"),
+        "tags":            asset.get("tags", []),
     }
 
 
 # ══════════════════════════════════════════════════════════════
-# RUN MANAGEMENT
+# HTTP POST
 # ══════════════════════════════════════════════════════════════
-def start_run(run_id: str, source: str) -> str:
-    with db() as conn:
-        conn.execute("""
-            INSERT INTO ingestion_runs(run_id, started_at, status, source)
-            VALUES(?,?,?,?)
-        """, (run_id, datetime.now(timezone.utc).isoformat(), "running", source))
-    return run_id
+async def _post_batch(client: httpx.AsyncClient, assets: List[dict]) -> bool:
+    if not MB_API_URL:
+        log.error("MB_API_URL not set — cannot push assets to main app")
+        return False
 
+    payload = {"api_key": INGEST_API_KEY, "assets": assets}
 
-def complete_run(run_id: str, stats: dict, status: str = "completed"):
-    with db() as conn:
-        conn.execute("""
-            UPDATE ingestion_runs SET
-                completed_at=?, status=?, total_fetched=?, added=?,
-                updated=?, deactivated=?, skipped=?, errors=?, notes=?
-            WHERE run_id=?
-        """, (
-            datetime.now(timezone.utc).isoformat(), status,
-            stats.get("fetched", 0), stats.get("added", 0),
-            stats.get("updated", 0), stats.get("deactivated", 0),
-            stats.get("skipped", 0), stats.get("errors", 0),
-            stats.get("notes", ""), run_id
-        ))
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            r = await client.post(INGEST_ENDPOINT, json=payload, timeout=REQUEST_TIMEOUT)
+            if r.status_code == 200:
+                data = r.json()
+                log.info(f"Ingest batch OK — accepted {data.get('accepted','?')}, "
+                         f"rejected {data.get('rejected','?')}")
+                return True
+            if r.status_code == 401:
+                log.error("Ingest API key rejected — check INGEST_API_KEY on both services")
+                return False
+            log.warning(f"Ingest POST HTTP {r.status_code} (attempt {attempt+1}): {r.text[:200]}")
+        except httpx.TimeoutException:
+            log.warning(f"Ingest POST timeout (attempt {attempt+1})")
+        except Exception as e:
+            log.warning(f"Ingest POST error (attempt {attempt+1}): {e}")
 
+        if attempt < RETRY_ATTEMPTS - 1:
+            await asyncio.sleep(RETRY_DELAY * (attempt + 1))
 
-def get_recent_runs(limit: int = 10) -> List[Dict]:
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM ingestion_runs ORDER BY started_at DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return [dict(r) for r in rows]
+    return False
 
 
 # ══════════════════════════════════════════════════════════════
-# ENGINE NOTIFICATIONS
+# PUBLIC API
 # ══════════════════════════════════════════════════════════════
-def _notify(conn: sqlite3.Connection, event_type: str, ticker: str, payload: dict):
-    conn.execute("""
-        INSERT INTO engine_notifications(event_type, ticker, payload)
-        VALUES(?,?,?)
-    """, (event_type, ticker, json.dumps(payload)))
+async def push_assets(assets: List[dict]) -> Dict[str, int]:
+    """Normalise and push assets to the main app via /api/ingest."""
+    if not assets:
+        return {"sent": 0, "batches_ok": 0, "batches_failed": 0}
 
+    normalised = [_normalise(a) for a in assets if a.get("ticker")]
+    seen = {}
+    for a in normalised:
+        seen[a["ticker"]] = a
+    deduped = list(seen.values())
 
-def get_pending_notifications(limit: int = 200) -> List[Dict]:
-    with db() as conn:
-        rows = conn.execute("""
-            SELECT * FROM engine_notifications
-            WHERE processed=0
-            ORDER BY created_at ASC
-            LIMIT ?
-        """, (limit,)).fetchall()
-    return [dict(r) for r in rows]
+    log.info(f"Pushing {len(deduped)} assets to {INGEST_ENDPOINT}")
 
+    batches_ok = batches_failed = 0
 
-def mark_notifications_processed(ids: List[int]):
-    now = datetime.now(timezone.utc).isoformat()
-    with db() as conn:
-        for nid in ids:
-            conn.execute(
-                "UPDATE engine_notifications SET processed=1, processed_at=? WHERE id=?",
-                (now, nid)
-            )
+    async with httpx.AsyncClient() as client:
+        for i in range(0, len(deduped), BATCH_SIZE):
+            batch = deduped[i : i + BATCH_SIZE]
+            ok = await _post_batch(client, batch)
+            if ok:
+                batches_ok += 1
+            else:
+                batches_failed += 1
+            if i + BATCH_SIZE < len(deduped):
+                await asyncio.sleep(0.5)
+
+    return {"sent": len(deduped), "batches_ok": batches_ok, "batches_failed": batches_failed}
 
 
 # ══════════════════════════════════════════════════════════════
-# INTERNAL HELPERS
+# SYNC WRAPPERS (for callers that aren't async)
 # ══════════════════════════════════════════════════════════════
-def _log(conn: sqlite3.Connection, run_id: str, action: str,
-         ticker: Optional[str], asset_type: Optional[str],
-         source: str, details: dict):
-    conn.execute("""
-        INSERT INTO ingestion_logs(run_id, action, ticker, asset_type, details, source)
-        VALUES(?,?,?,?,?,?)
-    """, (run_id, action, ticker, asset_type, json.dumps(details), source))
+def save_assets(assets: List[dict]) -> None:
+    """Synchronous wrapper around push_assets."""
+    result = asyncio.run(push_assets(assets))
+    if result["batches_failed"]:
+        log.warning(f"save_assets: {result['batches_failed']} batch(es) failed")
+    else:
+        log.info(f"save_assets: pushed {result['sent']} assets OK")
+
+
+def save_asset(asset: dict) -> None:
+    save_assets([asset])
