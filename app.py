@@ -23,23 +23,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ── Technicals module ─────────────────────────────────────────
-try:
-    from technicals import get_technicals
-    TECHNICALS_AVAILABLE = True
-except ImportError:
-    TECHNICALS_AVAILABLE = False
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────
 REDIS_URL       = os.environ.get("REDIS_URL", "redis://localhost:6379")
 SECRET_KEY      = os.environ.get("SECRET_KEY", "change-me-in-production-railway-env")
-INGEST_API_KEY  = os.environ.get("INGEST_API_KEY", "mb-ingest-secret")  # shared secret with ingestion engine
+INGEST_API_KEY  = os.environ.get("INGEST_API_KEY", "mb-ingest-secret")
 CACHE_TTL       = 5
 TOKEN_TTL       = 60 * 60 * 24 * 30   # 30 days
-UNIVERSE_TTL    = 60 * 60 * 6          # 6 hours — how long to keep universe in Redis
+UNIVERSE_TTL    = 60 * 60 * 6          # 6 hours
 REQUEST_TIMEOUT = 8
 
 YAHOO_URL          = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -55,7 +48,7 @@ _memory_cache: Dict[str, dict] = {}
 _memory_users: Dict[str, dict] = {}
 _memory_tokens: Dict[str, str] = {}
 _memory_portfolios: Dict[str, dict] = {}
-_memory_universe: List[dict] = []        # fallback universe store
+_memory_universe: Dict[str, dict] = {}   # ticker -> asset dict
 redis_client: Optional[aioredis.Redis] = None
 
 
@@ -164,18 +157,45 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     return user
 
 
+# ── Universe helpers ──────────────────────────────────────────
+UNIVERSE_KEY = "mb:universe"
+
+async def load_universe() -> Dict[str, dict]:
+    """Load full asset universe from Redis, fall back to memory."""
+    val = await rget(UNIVERSE_KEY)
+    if val:
+        try:
+            data = json.loads(val)
+            _memory_universe.update(data)
+            return data
+        except Exception:
+            pass
+    return dict(_memory_universe)
+
+async def save_universe(universe: Dict[str, dict]):
+    """Persist universe to Redis + memory."""
+    _memory_universe.update(universe)
+    try:
+        await rset(UNIVERSE_KEY, json.dumps(_memory_universe), UNIVERSE_TTL)
+    except Exception as e:
+        log.warning(f"Universe Redis save failed: {e}")
+
+
 # ── Lifespan ──────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await get_redis()
     Path("static").mkdir(exist_ok=True)
+    # Restore universe from Redis on startup
+    universe = await load_universe()
+    log.info(f"Universe loaded on startup: {len(universe)} assets")
     yield
     if redis_client:
         await redis_client.aclose()
 
 
 # ── App ───────────────────────────────────────────────────────
-app = FastAPI(title="Market Brain API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="Market Brain API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -195,26 +215,9 @@ class PortfolioSave(BaseModel):
     balance: float
     startBalance: float
 
-class AssetRecord(BaseModel):
-    ticker: str
-    name: Optional[str] = None
-    asset_type: Optional[str] = None
-    sector: Optional[str] = None
-    industry: Optional[str] = None
-    cap_tier: Optional[str] = None
-    exchange: Optional[str] = None
-    currency: Optional[str] = None
-    country: Optional[str] = None
-    market_cap: Optional[float] = None
-    beta: Optional[float] = None
-    pe_ratio: Optional[float] = None
-    avg_volume_30d: Optional[float] = None
-    fifty_two_week_high: Optional[float] = None
-    fifty_two_week_low: Optional[float] = None
-
 class IngestRequest(BaseModel):
-    assets: List[AssetRecord]
-    api_key: Optional[str] = None
+    api_key: str
+    assets: list
 
 
 # ── Auth endpoints ────────────────────────────────────────────
@@ -267,6 +270,51 @@ async def get_portfolio(current_user: dict = Depends(get_current_user)):
 async def save_portfolio_endpoint(data: PortfolioSave, current_user: dict = Depends(get_current_user)):
     await save_portfolio(current_user["email"], data.dict())
     return {"ok": True}
+
+
+# ── Ingest endpoint ───────────────────────────────────────────
+@app.post("/api/ingest", tags=["Ingest"])
+async def ingest_assets(req: IngestRequest):
+    """Receive assets from the ingestion engine and store in Redis."""
+    if req.api_key != INGEST_API_KEY:
+        raise HTTPException(401, "Invalid API key")
+
+    universe = await load_universe()
+    accepted = 0
+    rejected = 0
+
+    for asset in req.assets:
+        ticker = (asset.get("ticker") or "").upper().strip()
+        if not ticker:
+            rejected += 1
+            continue
+        # Merge — don't overwrite good data with None
+        existing = universe.get(ticker, {})
+        merged = {**existing}
+        for k, v in asset.items():
+            if v is not None:
+                merged[k] = v
+        merged["ticker"] = ticker
+        merged["ingested_at"] = int(time.time())
+        universe[ticker] = merged
+        accepted += 1
+
+    await save_universe(universe)
+    log.info(f"/api/ingest: accepted={accepted} rejected={rejected} total_universe={len(universe)}")
+    return {"accepted": accepted, "rejected": rejected, "total": len(universe)}
+
+
+# ── Universe endpoint ─────────────────────────────────────────
+@app.get("/api/universe", tags=["Universe"])
+async def get_universe():
+    """Return full asset universe for the frontend."""
+    universe = await load_universe()
+    assets = list(universe.values())
+    return {
+        "count": len(assets),
+        "assets": assets,
+        "timestamp": int(time.time()),
+    }
 
 
 # ── Price cache ───────────────────────────────────────────────
@@ -324,7 +372,7 @@ async def fetch_yahoo(symbol: str, client: httpx.AsyncClient) -> Optional[dict]:
                 "day_high": meta.get("regularMarketDayHigh"),
                 "day_low": meta.get("regularMarketDayLow"),
                 "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low":  meta.get("fiftyTwoWeekLow"),
+                "fifty_two_week_low": meta.get("fiftyTwoWeekLow"),
                 "timestamp": int(time.time()), "source": "yahoo_finance",
             }
         except httpx.TimeoutException: log.warning(f"Timeout: {symbol}")
@@ -354,19 +402,11 @@ def normalise_symbol(symbol: str) -> str:
 @app.get("/health")
 async def health():
     r = await get_redis()
-    universe_count = 0
-    try:
-        val = await rget("universe:assets")
-        if val:
-            universe_count = len(json.loads(val))
-        else:
-            universe_count = len(_memory_universe)
-    except: pass
+    universe = await load_universe()
     return {
         "status": "healthy",
         "redis": "connected" if r else "memory",
-        "technicals": TECHNICALS_AVAILABLE,
-        "universe_assets": universe_count,
+        "universe_size": len(universe),
         "timestamp": int(time.time()),
     }
 
@@ -399,64 +439,6 @@ async def search_symbol(q: str = Query(...)):
             return {"query": q, "results": [{"symbol": q["symbol"], "name": q.get("shortname") or q.get("longname"), "exchange": q.get("exchDisp")} for q in quotes if q.get("symbol")]}
     except Exception as e:
         raise HTTPException(500, f"Search failed: {e}")
-
-
-# ── Technicals endpoint ───────────────────────────────────────
-@app.get("/api/technicals", tags=["Technicals"])
-async def technicals(symbol: str = Query(...)):
-    """Real RSI, MACD, volume ratio and price vs MA50 from Yahoo. Cached 15 mins."""
-    if not TECHNICALS_AVAILABLE:
-        raise HTTPException(503, "Technicals module not available — ensure technicals.py is in repo root")
-    sym = normalise_symbol(symbol)
-    data = await get_technicals(sym)
-    if not data:
-        raise HTTPException(404, f"Technicals unavailable for {sym}")
-    return {"symbol": sym, "data": data}
-
-
-# ── Universe endpoints ────────────────────────────────────────
-@app.post("/api/ingest", tags=["Universe"])
-async def ingest_assets(req: IngestRequest):
-    """
-    Called by the ingestion engine (stock-price-api service) to push
-    the collected asset universe into Redis so the frontend can read it.
-    Protected by INGEST_API_KEY.
-    """
-    if req.api_key != INGEST_API_KEY:
-        raise HTTPException(403, "Invalid API key")
-    assets = [a.dict() for a in req.assets]
-    payload = json.dumps(assets)
-    await rset("universe:assets", payload, UNIVERSE_TTL)
-    await rset("universe:updated", str(int(time.time())))
-    _memory_universe.clear()
-    _memory_universe.extend(assets)
-    log.info(f"Universe updated: {len(assets)} assets ingested")
-    return {"ok": True, "count": len(assets)}
-
-@app.get("/api/universe", tags=["Universe"])
-async def get_universe():
-    """
-    Returns all assets pushed by the ingestion engine.
-    Frontend calls this on load to populate the asset grid.
-    """
-    val = await rget("universe:assets")
-    if val:
-        assets = json.loads(val)
-        updated = await rget("universe:updated")
-        return {
-            "assets": assets,
-            "count": len(assets),
-            "source": "redis",
-            "last_updated": int(updated) if updated else None,
-        }
-    if _memory_universe:
-        return {
-            "assets": _memory_universe,
-            "count": len(_memory_universe),
-            "source": "memory",
-            "last_updated": None,
-        }
-    return {"assets": [], "count": 0, "source": "none", "last_updated": None}
 
 
 # ── WebSocket ─────────────────────────────────────────────────
