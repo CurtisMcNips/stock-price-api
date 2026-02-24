@@ -467,7 +467,69 @@ async def websocket_price(websocket: WebSocket, symbol: str):
     except Exception as e: log.error(f"WS error {symbol}: {e}")
     finally: manager.disconnect(websocket, symbol)
 
+# ── Technicals ────────────────────────────────────────────────
+async def fetch_technicals(symbol: str, client: httpx.AsyncClient) -> Optional[dict]:
+    cached = await cache_get(f"tech:{symbol}")
+    if cached:
+        return {**cached, "cached": True}
+    for url_tmpl in [YAHOO_URL, YAHOO_FALLBACK_URL]:
+        try:
+            url = url_tmpl.format(symbol=symbol)
+            r = await client.get(url, params={"interval": "1d", "range": "6mo"}, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            if r.status_code != 200: continue
+            data = r.json()
+            result = data.get("chart", {}).get("result", [])
+            if not result: continue
+            quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
+            closes = [c for c in quotes.get("close", []) if c is not None]
+            volumes = [v for v in quotes.get("volume", []) if v is not None]
+            if len(closes) < 20: continue
+            def calc_rsi(prices, period=14):
+                if len(prices) < period + 1: return 50.0
+                deltas = [prices[i]-prices[i-1] for i in range(1, len(prices))]
+                gains = [d if d>0 else 0 for d in deltas]
+                losses = [-d if d<0 else 0 for d in deltas]
+                avg_gain = sum(gains[-period:])/period
+                avg_loss = sum(losses[-period:])/period
+                if avg_loss == 0: return 100.0
+                return round(100-(100/(1+avg_gain/avg_loss)), 2)
+            def calc_ema(prices, period):
+                k = 2/(period+1); ema=[prices[0]]
+                for p in prices[1:]: ema.append(p*k+ema[-1]*(1-k))
+                return ema
+            def calc_macd(prices):
+                if len(prices) < 26: return 0.0
+                macd_line = [a-b for a,b in zip(calc_ema(prices,12), calc_ema(prices,26))]
+                price = prices[-1] or 1
+                return round(max(-1, min(1, macd_line[-1]/price*50)), 4)
+            def price_vs_ma(prices, period):
+                if len(prices) < period: return 0.0
+                ma = sum(prices[-period:])/period
+                return round((prices[-1]-ma)/ma*100, 2)
+            vol_avg = sum(volumes[-21:-1])/max(1,len(volumes[-21:-1])) if len(volumes)>1 else 1
+            vol_ratio = round(volumes[-1]/vol_avg, 3) if vol_avg else 1.0
+            result_data = {
+                "symbol": symbol, "rsi": calc_rsi(closes), "macd": calc_macd(closes),
+                "volume_ratio": vol_ratio, "price_vs_ma50": price_vs_ma(closes, 50),
+                "price_vs_ma200": price_vs_ma(closes, min(200, len(closes))),
+                "timestamp": int(time.time()),
+            }
+            await cache_set(f"tech:{symbol}", result_data)
+            return {**result_data, "cached": False}
+        except httpx.TimeoutException: log.warning(f"Technicals timeout: {symbol}")
+        except Exception as e: log.warning(f"Technicals error {symbol}: {e}")
+    return None
 
+@app.get("/api/technicals", tags=["Technicals"])
+async def get_technicals(symbols: str = Query(...)):
+    raw = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not raw: raise HTTPException(400, "No symbols")
+    if len(raw) > 40: raise HTTPException(400, "Max 40 symbols")
+    sym_list = [normalise_symbol(s) for s in raw]
+    client = await get_client()
+    fetched = await asyncio.gather(*[fetch_technicals(s, client) for s in sym_list], return_exceptions=True)
+    results = {sym: (None if isinstance(r, Exception) else r) for sym, r in zip(sym_list, fetched)}
+    return {"count": len(results), "data": results, "timestamp": int(time.time())}
 # ── Static / frontend ─────────────────────────────────────────
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
