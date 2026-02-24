@@ -58,6 +58,17 @@ async function fetchFxRates(){
     return rates;
   }catch(e){return null;}
 }
+async function fetchTechnicals(tickers){
+  try{
+    const chunks=[];for(let i=0;i<tickers.length;i+=40)chunks.push(tickers.slice(i,i+40));
+    const results={};
+    for(const chunk of chunks){
+      const j=await api(`/api/technicals?symbols=${chunk.join(",")}`);
+      Object.assign(results,j.data||{});
+    }
+    return Object.keys(results).length>0?results:null;
+  }catch(e){return null;}
+}
 
 // ── DATA ──────────────────────────────────────────────────────
 const CURRENCIES=[
@@ -143,21 +154,33 @@ const RISK_CFG={CRITICAL:{label:"CRITICAL",color:"#ff1744",bg:"#160004"},HIGH:{l
 const TF_PROFILES={"⚡ Intraday":{short:"0-24h",color:"#ff6d00",icon:"⚡",simDays:0.5},"📈 Short Swing":{short:"2-5d",color:"#ffd600",icon:"📈",simDays:3.5},"🌊 Medium Swing":{short:"1-4wk",color:"#00d4ff",icon:"🌊",simDays:17.5},"🏔️ Position":{short:"1-6mo",color:"#00e676",icon:"🏔️",simDays:105},"🌳 Long Term":{short:"6mo+",color:"#aed581",icon:"🌳",simDays:548}};
 const TF_KEYS=Object.keys(TF_PROFILES);
 const WATCH_DURATIONS=[{label:"24 hours",ms:86400000,tf:"⚡ Intraday"},{label:"3 days",ms:259200000,tf:"📈 Short Swing"},{label:"5 days",ms:432000000,tf:"📈 Short Swing"},{label:"1 week",ms:604800000,tf:"🌊 Medium Swing"},{label:"2 weeks",ms:1209600000,tf:"🌊 Medium Swing"},{label:"1 month",ms:2592000000,tf:"🏔️ Position"},{label:"3 months",ms:7776000000,tf:"🏔️ Position"},{label:"6 months",ms:15552000000,tf:"🌳 Long Term"}];
-let SECTORS=["All",...new Set(ASSETS.map(a=>a.sector))];
-async function loadUniverse(){try{const j=await fetch("/api/universe").then(r=>r.json());if(!j.assets||!j.assets.length)return false;ASSETS.length=0;j.assets.forEach(a=>ASSETS.push({ticker:a.ticker,name:a.name||a.ticker,sector:a.sector||"Other",sub:a.industry||a.asset_type||"",cap:a.cap_tier||a.market_cap_tier||"Mid",vol:a.volatility_tier||"Med",priceRange:[1,1000]}));SECTORS=["All",...new Set(ASSETS.map(a=>a.sector).filter(Boolean))];return true;}catch(e){console.warn("Universe load failed",e);return false;}}
+const SECTORS=["All",...new Set(ASSETS.map(a=>a.sector))];
 const CAPS=["All","Nano","Micro","Small","Mid","Large"];
 
 // ── SIGNALS ───────────────────────────────────────────────────
 function sr(seed,min,max){const x=Math.sin(seed+1)*10000;return min+(x-Math.floor(x))*(max-min);}
-function generateSignals(asset,key){
+
+function generateSignals(asset,key,techData){
   const s=asset.ticker.split("").reduce((a,c)=>a+c.charCodeAt(0),0)+key;
   const r=(min,max,o=0)=>sr(s+o,min,max);
   const capTier=CAP_TIERS[asset.cap]??2;
   const volMod={Low:0.6,Med:0.8,High:1.0,VHigh:1.2,Extreme:1.5}[asset.vol]||1;
-  const rsi=r(18,82,1),macd=r(-1,1,2),volume=r(0.4,4.0,3),sentiment=r(-1,1,4);
-  const shortInt=r(0,35,5),earningsBeat=r(-25,40,6),priceVsMA50=r(-30,40,7),priceVsMA200=r(-40,50,8);
+
+  // Use real technicals if available, fall back to simulated
+  const tech=techData?.[asset.ticker];
+  const rsi         = tech?.rsi           ?? r(18,82,1);
+  const macd        = tech?.macd          ?? r(-1,1,2);
+  const volume      = tech?.volume_ratio  ?? r(0.4,4.0,3);
+  const priceVsMA50 = tech?.price_vs_ma50 ?? r(-30,40,7);
+  const priceVsMA200= tech?.price_vs_ma200?? r(-40,50,8);
+  const realTech    = !!tech;
+
+  // Still simulated (no data source yet)
+  const sentiment=r(-1,1,4);
+  const shortInt=r(0,35,5),earningsBeat=r(-25,40,6);
   const insiderBuy=r(0,1,9),catalystNews=r(-1,1,10),sectorFlow=r(-1,1,11);
   const daysToEarnings=r(0,90,13),debtRatio=r(0,3,14),revGrowth=r(-20,120,15);
+
   let score=0;
   score+=rsi<30?22:rsi>72?-18:(50-rsi)*0.3;
   score+=macd*18;score+=(volume-1)*10;score+=sentiment*22;
@@ -186,14 +209,17 @@ function generateSignals(asset,key){
   tfScores["🏔️ Position"]=Math.max(5,Math.min(95,(revGrowth>30?28:revGrowth>10?16:0)+(insiderBuy>0.65?22:0)+(debtRatio<1?18:debtRatio<2?8:0)+(sectorFlow>0.3?15:0)+(capTier>=2?10:0)));
   tfScores["🌳 Long Term"]=Math.max(5,Math.min(95,(revGrowth>20?25:0)+(debtRatio<1.5?20:0)+(capTier>=3?22:capTier===2?12:0)+(insiderBuy>0.5?15:0)+(sectorFlow>0?10:0)));
   const bestTF=Object.entries(tfScores).sort((a,b)=>b[1]-a[1])[0][0];
-  return{score:Math.round(score),risk,price:parseFloat(price.toFixed(4)),upsidePct:parseFloat(upsidePct.toFixed(1)),stopPct:parseFloat((stopPct*100).toFixed(1)),rrRatio,entryQ,tfScores,bestTF,livePrice:false,changePct:0,metrics:{rsi,macd,volume,sentiment,shortInt,revGrowth,debtRatio,daysToEarnings}};
+  return{score:Math.round(score),risk,price:parseFloat(price.toFixed(4)),upsidePct:parseFloat(upsidePct.toFixed(1)),stopPct:parseFloat((stopPct*100).toFixed(1)),rrRatio,entryQ,tfScores,bestTF,livePrice:false,changePct:0,realTech,metrics:{rsi,macd,volume,sentiment,shortInt,revGrowth,debtRatio,daysToEarnings,priceVsMA50,priceVsMA200}};
 }
+
 function mergeLiveData(sig,liveData,asset){
   const live=liveData?.[asset.ticker];
   if(!live?.price) return sig;
   const realPrice=live.currency==="GBX"?live.price/100:live.price;
   const changeSign=live.change_pct>0?1:live.change_pct<0?-1:0;
-  return{...sig,price:parseFloat(realPrice.toFixed(4)),livePrice:true,marketState:live.market_state||"CLOSED",currency:live.currency||"USD",changePct:live.change_pct||0,metrics:{...sig.metrics,rsi:Math.max(10,Math.min(90,sig.metrics.rsi+(changeSign*8)))}};
+  // Only nudge RSI if we don't have real technicals
+  const rsiAdjusted=sig.realTech?sig.metrics.rsi:Math.max(10,Math.min(90,sig.metrics.rsi+(changeSign*8)));
+  return{...sig,price:parseFloat(realPrice.toFixed(4)),livePrice:true,marketState:live.market_state||"CLOSED",currency:live.currency||"USD",changePct:live.change_pct||0,metrics:{...sig.metrics,rsi:rsiAdjusted}};
 }
 
 // ── HELPERS ───────────────────────────────────────────────────
@@ -208,7 +234,7 @@ const Modal=({onClose,children,maxWidth=460})=>(<div style={{position:"fixed",in
 
 // ── WELCOME / AUTH PAGE ───────────────────────────────────────
 function WelcomePage({onAuth}){
-  const[mode,setMode]=useState("home"); // home | login | signup
+  const[mode,setMode]=useState("home");
   const[form,setForm]=useState({name:"",email:"",password:""});
   const[error,setError]=useState("");
   const[loading,setLoading]=useState(false);
@@ -222,12 +248,10 @@ function WelcomePage({onAuth}){
         if(!form.email.includes("@"))throw new Error("Valid email required");
         if(form.password.length<6)throw new Error("Password must be 6+ characters");
         const j=await api("/api/auth/register",{method:"POST",body:JSON.stringify({name:form.name,email:form.email,password:form.password})});
-        localStorage.setItem("mb_token",j.token);
-        onAuth(j.user);
+        localStorage.setItem("mb_token",j.token);onAuth(j.user);
       }else{
         const j=await api("/api/auth/login",{method:"POST",body:JSON.stringify({email:form.email,password:form.password})});
-        localStorage.setItem("mb_token",j.token);
-        onAuth(j.user);
+        localStorage.setItem("mb_token",j.token);onAuth(j.user);
       }
     }catch(e){setError(e.message);}
     setLoading(false);
@@ -235,19 +259,15 @@ function WelcomePage({onAuth}){
 
   if(mode==="home") return(
     <div style={{minHeight:"100vh",background:"#03030a",display:"flex",flexDirection:"column",overflow:"auto"}}>
-      {/* NAV */}
       <div style={{padding:"16px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #0c0c18"}}>
-        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:4,color:"#dde0ff"}}>
-          MARKET <span style={{color:"#00b0ff"}}>BRAIN</span>
-        </div>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:4,color:"#dde0ff"}}>MARKET <span style={{color:"#00b0ff"}}>BRAIN</span></div>
         <div style={{display:"flex",gap:8}}>
           <button onClick={()=>setMode("login")} style={{background:"transparent",border:"1px solid #1a1a2e",borderRadius:6,padding:"7px 16px",color:"#8a8aaa",fontSize:10,letterSpacing:1}}>LOG IN</button>
           <button onClick={()=>setMode("signup")} className="hero-btn" style={{background:"#00b0ff22",border:"1px solid #00b0ff",borderRadius:6,padding:"7px 16px",color:"#00b0ff",fontSize:10,letterSpacing:1}}>SIGN UP FREE</button>
         </div>
       </div>
-      {/* HERO */}
       <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 24px",textAlign:"center"}}>
-        <div style={{fontSize:11,color:"#00b0ff",letterSpacing:4,marginBottom:16,fontFamily:"monospace"}}>● LIVE YAHOO FINANCE · NO API KEY NEEDED</div>
+        <div style={{fontSize:11,color:"#00b0ff",letterSpacing:4,marginBottom:16,fontFamily:"monospace"}}>● LIVE YAHOO FINANCE · REAL TECHNICAL INDICATORS</div>
         <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:64,fontWeight:900,lineHeight:1,marginBottom:16,letterSpacing:2}}>
           <span style={{color:"#dde0ff"}}>TRADE SMARTER.</span><br/>
           <span style={{background:"linear-gradient(90deg,#00b0ff,#00e676)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>WITHOUT THE RISK.</span>
@@ -256,72 +276,32 @@ function WelcomePage({onAuth}){
           Market Brain gives you real-time signal analysis across 60+ assets — stocks, crypto, forex, metals and more. Practice virtual trading, time your watchlist predictions, and track your accuracy over time.
         </div>
         <div style={{display:"flex",gap:12,flexWrap:"wrap",justifyContent:"center",marginBottom:60}}>
-          <button onClick={()=>setMode("signup")} className="hero-btn" style={{background:"linear-gradient(135deg,#00b0ff,#0080cc)",border:"none",borderRadius:8,padding:"14px 32px",color:"#fff",fontSize:12,letterSpacing:2,fontWeight:700,boxShadow:"0 0 40px #00b0ff44"}}>
-            GET STARTED FREE →
-          </button>
-          <button onClick={()=>setMode("login")} className="hero-btn" style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:8,padding:"14px 32px",color:"#8a8aaa",fontSize:12,letterSpacing:2}}>
-            I HAVE AN ACCOUNT
-          </button>
+          <button onClick={()=>setMode("signup")} className="hero-btn" style={{background:"linear-gradient(135deg,#00b0ff,#0080cc)",border:"none",borderRadius:8,padding:"14px 32px",color:"#fff",fontSize:12,letterSpacing:2,fontWeight:700,boxShadow:"0 0 40px #00b0ff44"}}>GET STARTED FREE →</button>
+          <button onClick={()=>setMode("login")} className="hero-btn" style={{background:"transparent",border:"1px solid #2a2a40",borderRadius:8,padding:"14px 32px",color:"#8a8aaa",fontSize:12,letterSpacing:2}}>I HAVE AN ACCOUNT</button>
         </div>
-        {/* Feature cards */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,maxWidth:860,width:"100%"}}>
-          {[
-            {icon:"📊",title:"60+ Assets",desc:"Stocks, crypto, forex, metals, minerals and more with live Yahoo Finance prices"},
-            {icon:"🎯",title:"Signal Engine",desc:"Timeframe alignment scores for intraday, swing, position and long-term trading"},
-            {icon:"💼",title:"Virtual Portfolio",desc:"Practice with a virtual budget. Place trades, track P&L, and close positions"},
-            {icon:"★",title:"Timed Watchlist",desc:"Watch assets for set periods and score the engine's prediction accuracy"},
-            {icon:"📈",title:"Accuracy Tracker",desc:"Overall win rate broken down by cap size, sector, and timeframe"},
-            {icon:"🔴",title:"Live Prices",desc:"Real-time prices with live FX conversion to your preferred currency"},
-          ].map(f=>(
-            <div key={f.title} style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:"16px",textAlign:"left"}}>
-              <div style={{fontSize:24,marginBottom:8}}>{f.icon}</div>
-              <div style={{fontSize:12,fontWeight:700,color:"#dde0ff",marginBottom:4}}>{f.title}</div>
-              <div style={{fontSize:10,color:"#4a4a6a",lineHeight:1.7}}>{f.desc}</div>
-            </div>
-          ))}
+          {[{icon:"📊",title:"60+ Assets",desc:"Stocks, crypto, forex, metals, minerals and more with live Yahoo Finance prices"},{icon:"🎯",title:"Real Technicals",desc:"RSI, MACD, volume ratio and MA distance calculated from real 6-month price data"},{icon:"💼",title:"Virtual Portfolio",desc:"Practice with a virtual budget. Place trades, track P&L, and close positions"},{icon:"★",title:"Timed Watchlist",desc:"Watch assets for set periods and score the engine's prediction accuracy"},{icon:"📈",title:"Accuracy Tracker",desc:"Overall win rate broken down by cap size, sector, and timeframe"},{icon:"🔴",title:"Live Prices",desc:"Real-time prices with live FX conversion to your preferred currency"}].map(f=>(<div key={f.title} style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:8,padding:"16px",textAlign:"left"}}><div style={{fontSize:24,marginBottom:8}}>{f.icon}</div><div style={{fontSize:12,fontWeight:700,color:"#dde0ff",marginBottom:4}}>{f.title}</div><div style={{fontSize:10,color:"#4a4a6a",lineHeight:1.7}}>{f.desc}</div></div>))}
         </div>
       </div>
-      <div style={{padding:"16px",textAlign:"center",fontSize:8,color:"#1a1a28",borderTop:"1px solid #0c0c18"}}>
-        Market Brain · Virtual simulation only · Not financial advice
-      </div>
+      <div style={{padding:"16px",textAlign:"center",fontSize:8,color:"#1a1a28",borderTop:"1px solid #0c0c18"}}>Market Brain · Virtual simulation only · Not financial advice</div>
     </div>
   );
 
-  // AUTH FORM
   const isSignup=mode==="signup";
   return(
     <div style={{minHeight:"100vh",background:"#03030a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{width:"100%",maxWidth:400,animation:"fadeIn 0.3s ease"}}>
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:900,letterSpacing:4,color:"#dde0ff",marginBottom:4}}>
-            MARKET <span style={{color:"#00b0ff"}}>BRAIN</span>
-          </div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:900,letterSpacing:4,color:"#dde0ff",marginBottom:4}}>MARKET <span style={{color:"#00b0ff"}}>BRAIN</span></div>
           <div style={{fontSize:11,color:"#4a4a6a"}}>{isSignup?"Create your free account":"Welcome back"}</div>
         </div>
         <div style={{background:"#07070f",border:"1px solid #1a1a2e",borderRadius:12,padding:28,animation:"glow 3s infinite"}}>
-          {isSignup&&(
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>YOUR NAME</div>
-              <input value={form.name} onChange={set("name")} placeholder="John Smith" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}/>
-            </div>
-          )}
-          <div style={{marginBottom:14}}>
-            <div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>EMAIL</div>
-            <input value={form.email} onChange={set("email")} placeholder="you@example.com" type="email" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}/>
-          </div>
-          <div style={{marginBottom:20}}>
-            <div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>PASSWORD</div>
-            <input value={form.password} onChange={set("password")} placeholder={isSignup?"At least 6 characters":"Your password"} type="password" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-          </div>
+          {isSignup&&(<div style={{marginBottom:14}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>YOUR NAME</div><input value={form.name} onChange={set("name")} placeholder="John Smith" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}/></div>)}
+          <div style={{marginBottom:14}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>EMAIL</div><input value={form.email} onChange={set("email")} placeholder="you@example.com" type="email" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}}/></div>
+          <div style={{marginBottom:20}}><div style={{fontSize:8,color:"#2a2a40",letterSpacing:2,marginBottom:5}}>PASSWORD</div><input value={form.password} onChange={set("password")} placeholder={isSignup?"At least 6 characters":"Your password"} type="password" style={{width:"100%",background:"#0e0e1c",border:"1px solid #1a1a2e",borderRadius:6,padding:"10px 12px",color:"#c0c0e0",fontSize:13}} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
           {error&&<div style={{background:"#ff174420",border:"1px solid #ff174444",borderRadius:6,padding:"8px 12px",fontSize:10,color:"#ff6a6a",marginBottom:14}}>{error}</div>}
-          <button onClick={submit} disabled={loading} style={{width:"100%",background:loading?"#1a1a2e":"linear-gradient(135deg,#00b0ff,#0080cc)",border:"none",borderRadius:8,padding:"12px",color:loading?"#3a3a50":"#fff",fontSize:11,letterSpacing:2,fontWeight:700}}>
-            {loading?"LOADING...":(isSignup?"CREATE ACCOUNT":"LOG IN")}
-          </button>
-          <div style={{textAlign:"center",marginTop:16,fontSize:9,color:"#4a4a6a"}}>
-            {isSignup?"Already have an account? ":"Don't have an account? "}
-            <span onClick={()=>{setMode(isSignup?"login":"signup");setError("");}} style={{color:"#00b0ff",cursor:"pointer"}}>{isSignup?"Log in":"Sign up free"}</span>
-          </div>
+          <button onClick={submit} disabled={loading} style={{width:"100%",background:loading?"#1a1a2e":"linear-gradient(135deg,#00b0ff,#0080cc)",border:"none",borderRadius:8,padding:"12px",color:loading?"#3a3a50":"#fff",fontSize:11,letterSpacing:2,fontWeight:700}}>{loading?"LOADING...":(isSignup?"CREATE ACCOUNT":"LOG IN")}</button>
+          <div style={{textAlign:"center",marginTop:16,fontSize:9,color:"#4a4a6a"}}>{isSignup?"Already have an account? ":"Don't have an account? "}<span onClick={()=>{setMode(isSignup?"login":"signup");setError("");}} style={{color:"#00b0ff",cursor:"pointer"}}>{isSignup?"Log in":"Sign up free"}</span></div>
         </div>
         <button onClick={()=>setMode("home")} style={{display:"block",margin:"16px auto 0",background:"none",border:"none",color:"#3a3a55",fontSize:9}}>← Back to home</button>
       </div>
@@ -346,7 +326,6 @@ function TradeModal({asset,sig,balance,fmtMoney,toLocal,onPlace,onClose}){
   const risk2=balance*0.02;
   const suggested=parseFloat(stopPct)>0&&priceLocal>0?Math.floor(risk2/(priceLocal*parseFloat(stopPct)/100)):0;
   const canPlace=sharesN>0&&totalCost<=balance;
-  const tfP=TF_PROFILES[tf];
   return(
     <Modal onClose={onClose} maxWidth={480}>
       <div style={{background:"#0a0a16",borderBottom:`1px solid ${R.color}44`,padding:"14px 16px",borderRadius:"12px 12px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -436,6 +415,7 @@ function MainApp({user,onLogout}){
   const[allSigs,setAllSigs]=useState({});
   const[loading,setLoading]=useState(true);
   const[liveCount,setLiveCount]=useState(0);
+  const[techCount,setTechCount]=useState(0);
   const[fxRates,setFxRates]=useState(null);
   const[lastUpdated,setLastUpdated]=useState(null);
   const[selected,setSelected]=useState(null);
@@ -457,7 +437,7 @@ function MainApp({user,onLogout}){
   const[saving,setSaving]=useState(false);
   useEffect(()=>{const t=setInterval(()=>setTick(s=>s+1),10000);return()=>clearInterval(t);},[]);
 
-  // Load portfolio on mount
+  // Load portfolio
   useEffect(()=>{
     api("/api/portfolio").then(p=>{
       if(p.trades) setTrades(p.trades);
@@ -474,7 +454,6 @@ function MainApp({user,onLogout}){
     catch(e){}
     setSaving(false);
   },[]);
-
   useEffect(()=>{
     const timer=setTimeout(()=>savePortfolio(trades,watchItems,balance,startBalance),2000);
     return()=>clearTimeout(timer);
@@ -489,16 +468,43 @@ function MainApp({user,onLogout}){
   },[fxRates,activeCurrency]);
   const fmtMoney=useCallback((usd)=>{const v=toLocal(usd);return`${activeCurrency.symbol}${v.toFixed(v>1000?2:v>1?2:4)}`;},[toLocal,activeCurrency]);
 
-  // Refresh
+  // Refresh — now fetches technicals in parallel
   const doRefresh=useCallback(async()=>{
-    const key=Date.now();const sigs={};
-    ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key);});
+    const key=Date.now();
+    const tickers=ASSETS.map(a=>a.ticker);
     try{
-      const[liveData,liveFx]=await Promise.all([fetchLivePrices(ASSETS.map(a=>a.ticker)),fetchFxRates()]);
+      const[liveData,liveFx,techData]=await Promise.all([
+        fetchLivePrices(tickers),
+        fetchFxRates(),
+        fetchTechnicals(tickers),
+      ]);
       if(liveFx) setFxRates(liveFx);
-      if(liveData){let cnt=0;ASSETS.forEach(a=>{if(sigs[a.ticker]){const m=mergeLiveData(sigs[a.ticker],liveData,a);sigs[a.ticker]=m;if(m.livePrice)cnt++;}});setLiveCount(cnt);}
-    }catch(e){}
-    setAllSigs(sigs);setLastUpdated(new Date().toLocaleTimeString("en-GB"));setLoading(false);
+      const sigs={};
+      ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,techData);});
+      if(liveData){
+        let cnt=0;
+        ASSETS.forEach(a=>{
+          if(sigs[a.ticker]){
+            const m=mergeLiveData(sigs[a.ticker],liveData,a);
+            sigs[a.ticker]=m;
+            if(m.livePrice)cnt++;
+          }
+        });
+        setLiveCount(cnt);
+      }
+      if(techData){
+        const tc=Object.values(techData).filter(v=>v!==null).length;
+        setTechCount(tc);
+      }
+      setAllSigs(sigs);
+    }catch(e){
+      // Fallback: generate with no tech data
+      const sigs={};
+      ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,null);});
+      setAllSigs(sigs);
+    }
+    setLastUpdated(new Date().toLocaleTimeString("en-GB"));
+    setLoading(false);
   },[]);
   useEffect(()=>{doRefresh();},[]);
   useEffect(()=>{const t=setInterval(doRefresh,30000);return()=>clearInterval(t);},[]);
@@ -523,7 +529,6 @@ function MainApp({user,onLogout}){
   },[trades,allSigs,toLocal]);
 
   const accuracy=useMemo(()=>calcAccuracy(trades,watchItems),[trades,watchItems]);
-
   const placeTrade=useCallback((td)=>{setTrades(p=>[...p,td]);setBalance(p=>parseFloat((p-td.totalCost).toFixed(2)));},[]);
   const closeTrade=useCallback((id)=>{
     setTrades(p=>p.map(t=>{
@@ -598,6 +603,7 @@ function MainApp({user,onLogout}){
         </div>
         <div style={{marginLeft:"auto",display:"flex",gap:5,alignItems:"center"}}>
           <div style={{fontSize:8,color:liveCount>0?"#00e676":"#3a3a50"}}>● {liveCount} LIVE</div>
+          {techCount>0&&<div style={{fontSize:8,color:"#00d4ff"}}>◈ {techCount} TECH</div>}
           <button onClick={()=>setShowCurrModal(true)} style={{background:"#0a0a16",border:"1px solid #00b0ff44",borderRadius:5,padding:"4px 9px",display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:13}}>{activeCurrency.flag}</span><span style={{fontSize:9,color:"#00b0ff",fontWeight:700}}>{activeCurrency.code}</span></button>
           <button onClick={()=>setShowBudget(true)} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#ffd600",fontSize:8}}>💰 {sym}{balance.toFixed(0)}</button>
           <button onClick={doRefresh} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#5a5a8a",fontSize:11}}>↻</button>
@@ -619,7 +625,7 @@ function MainApp({user,onLogout}){
               {CAPS.map(c=>(<Pill key={c} label={c} active={activeCap===c} color={CAP_COLORS[c]||"#00b0ff"} onClick={()=>setActiveCap(c)}/>))}
             </div>
             <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-              {SECTORS.map(s=>(<Pill key={s} label={s==="All"?"ALL":s.toUpperCase()} active={activeSector===s} onClick={()=>setActiveSector(s)}/>))}
+              {SECTORS.map(s=>(<Pill key={s} label={s==="All"?"ALL":s.slice(0,7).toUpperCase()} active={activeSector===s} onClick={()=>setActiveSector(s)}/>))}
               <div style={{marginLeft:"auto",display:"flex",gap:3}}>
                 {[["bestTF","Best"],["score","Score"],["rr","R/R"],["price_asc","Cheap"],["change","Movers"]].map(([v,l])=>(<Pill key={v} label={l} active={sortMode===v} onClick={()=>setSortMode(v)}/>))}
               </div>
@@ -640,7 +646,11 @@ function MainApp({user,onLogout}){
                     <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:R.color}}/>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
                       <span style={{fontSize:12,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{a.ticker}</span>
-                      <div style={{display:"flex",gap:3,alignItems:"center"}}>{sig.livePrice&&<span style={{fontSize:6,color:"#00e676"}}>●</span>}<Tag color={R.color} small>{R.label}</Tag></div>
+                      <div style={{display:"flex",gap:3,alignItems:"center"}}>
+                        {sig.realTech&&<span style={{fontSize:6,color:"#00d4ff"}} title="Real technicals">◈</span>}
+                        {sig.livePrice&&<span style={{fontSize:6,color:"#00e676"}}>●</span>}
+                        <Tag color={R.color} small>{R.label}</Tag>
+                      </div>
                     </div>
                     <div style={{fontSize:8,color:"#2a2a3a",marginBottom:4}}>{a.name}</div>
                     <div style={{background:bP.color+"18",border:`1px solid ${bP.color}33`,borderRadius:4,padding:"3px 6px",marginBottom:4,display:"flex",justifyContent:"space-between"}}>
@@ -668,7 +678,11 @@ function MainApp({user,onLogout}){
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:17,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{fmtMoney(sig.price)}</div>
                     {sig.changePct!==0&&<div style={{fontSize:10,color:pnlColor(sig.changePct),fontFamily:"monospace"}}>{fmtPct(sig.changePct)}</div>}
-                    <div style={{marginTop:3,display:"flex",gap:3,justifyContent:"flex-end"}}>{sig.livePrice?<Tag color="#00e676">● LIVE</Tag>:<Tag color="#3a3a55">SIM</Tag>}<Tag color={R.color}>{R.label}</Tag></div>
+                    <div style={{marginTop:3,display:"flex",gap:3,justifyContent:"flex-end"}}>
+                      {sig.realTech&&<Tag color="#00d4ff">◈ REAL TECH</Tag>}
+                      {sig.livePrice?<Tag color="#00e676">● LIVE</Tag>:<Tag color="#3a3a55">SIM</Tag>}
+                      <Tag color={R.color}>{R.label}</Tag>
+                    </div>
                   </div>
                 </div>
                 <div style={{background:"#0a0a16",borderRadius:6,padding:10}}>
@@ -680,9 +694,20 @@ function MainApp({user,onLogout}){
                   <Stat label="UPSIDE" value={`+${sig.upsidePct}%`} color="#00e676"/>
                   <Stat label="STOP" value={`-${sig.stopPct}%`} color="#ff1744"/>
                   <Stat label="ENTRY Q" value={sig.entryQ} color={sig.entryQ==="IDEAL"?"#00e676":sig.entryQ==="GOOD"?"#00b0ff":sig.entryQ==="FAIR"?"#ffd600":"#ff6d00"}/>
-                  <Stat label="RSI" value={sig.metrics.rsi.toFixed(0)} color={sig.metrics.rsi<30?"#00e676":sig.metrics.rsi>70?"#ff1744":"#c0c0e0"}/>
-                  <Stat label="VOL x" value={sig.metrics.volume.toFixed(1)+"x"} color={sig.metrics.volume>1.5?"#00d4ff":"#c0c0e0"}/>
+                  <Stat label={sig.realTech?"RSI ◈":"RSI"} value={sig.metrics.rsi.toFixed(0)} color={sig.metrics.rsi<30?"#00e676":sig.metrics.rsi>70?"#ff1744":"#c0c0e0"}/>
+                  <Stat label={sig.realTech?"VOL ◈":"VOL x"} value={sig.metrics.volume.toFixed(1)+"x"} color={sig.metrics.volume>1.5?"#00d4ff":"#c0c0e0"}/>
                 </div>
+                {sig.realTech&&(
+                  <div style={{background:"#00d4ff08",border:"1px solid #00d4ff22",borderRadius:6,padding:10}}>
+                    <div style={{fontSize:7,color:"#00d4ff",letterSpacing:2,marginBottom:8}}>REAL TECHNICALS ◈</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                      <Stat label="MACD" value={sig.metrics.macd.toFixed(3)} color={sig.metrics.macd>0?"#00e676":"#ff6d00"}/>
+                      <Stat label="VS MA50" value={`${sig.metrics.priceVsMA50>0?"+":""}${sig.metrics.priceVsMA50?.toFixed(1)}%`} color={sig.metrics.priceVsMA50<-10?"#00e676":sig.metrics.priceVsMA50>20?"#ff1744":"#c0c0e0"}/>
+                      <Stat label="VS MA200" value={`${sig.metrics.priceVsMA200>0?"+":""}${sig.metrics.priceVsMA200?.toFixed(1)}%`} color={sig.metrics.priceVsMA200<-15?"#00e676":sig.metrics.priceVsMA200>30?"#ff1744":"#c0c0e0"}/>
+                      <Stat label="SIGNAL" value={sig.score>0?"BULL":"BEAR"} color={sig.score>0?"#00e676":"#ff1744"}/>
+                    </div>
+                  </div>
+                )}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
                   <button onClick={()=>setShowWatchModal(true)} disabled={inWatch} style={{background:inWatch?"#1a1a2e":"#ffd60022",border:`1px solid ${inWatch?"#2a2a40":"#ffd600"}`,borderRadius:6,padding:"9px",color:inWatch?"#3a3a50":"#ffd600",fontSize:9,letterSpacing:1}}>{inWatch?"★ WATCHING":"★ WATCH"}</button>
                   <button onClick={()=>setShowTradeModal(true)} disabled={balance<toLocal(sig.price)} style={{background:balance>=toLocal(sig.price)?R.color+"22":"#1a1a2e",border:`1px solid ${balance>=toLocal(sig.price)?R.color:"#2a2a40"}`,borderRadius:6,padding:"9px",color:balance>=toLocal(sig.price)?R.color:"#3a3a50",fontSize:9,letterSpacing:1}}>📈 TRADE</button>
@@ -820,7 +845,7 @@ function MainApp({user,onLogout}){
 
       <div style={{borderTop:"1px solid #0e0e18",padding:"3px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,background:"#03030a"}}>
         <span style={{fontSize:7,color:liveCount>0?"#00e676":"#3a3a50",animation:liveCount>0?"pulse 2s infinite":"none"}}>{liveCount>0?"● LIVE":"● SIM"}</span>
-        <span style={{fontSize:7,color:"#2a2a40"}}>{liveCount} live · {ASSETS.length-liveCount} sim · auto-saves</span>
+        <span style={{fontSize:7,color:"#2a2a40"}}>{liveCount} live · {techCount} real tech · auto-saves</span>
         {lastUpdated&&<span style={{fontSize:7,color:"#1a1a28",marginLeft:"auto"}}>Updated {lastUpdated}</span>}
       </div>
     </div>
@@ -831,19 +856,16 @@ function MainApp({user,onLogout}){
 function Root(){
   const[user,setUser]=useState(null);
   const[checking,setChecking]=useState(true);
-
   useEffect(()=>{
     const token=localStorage.getItem("mb_token");
     if(!token){setChecking(false);return;}
     api("/api/auth/me").then(u=>{setUser(u);setChecking(false);}).catch(()=>{localStorage.removeItem("mb_token");setChecking(false);});
   },[]);
-
   if(checking) return(<div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:32,height:32,border:"3px solid #1a1a2e",borderTop:"3px solid #00b0ff",borderRadius:"50%",animation:"spin 1s linear infinite"}}/></div>);
   if(!user) return(<WelcomePage onAuth={u=>setUser(u)}/>);
   return(<MainApp user={user} onLogout={()=>setUser(null)}/>);
 }
-
-loadUniverse().then(()=>{ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);});
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
 </script>
 </body>
 </html>
