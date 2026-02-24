@@ -349,7 +349,7 @@ async def run_ingestion(mode: str = "update") -> Dict:
         log.error(f"Ingestion run failed: {e}", exc_info=True)
         stats["status"] = "failed"
         stats["notes"]  = str(e)
-        complete_run(run_id, stats, "failed")
+        await complete_run(run_id, stats, "failed")
 
     return stats
 
@@ -360,7 +360,7 @@ async def run_ingestion(mode: str = "update") -> Dict:
 
 async def run_scheduled():
     log.info("Ingestion bot started in scheduled mode")
-    await run_ingestion(mode="update")
+    await complete_run(run_id, stats, "completed")
 
     while True:
         now     = datetime.now(timezone.utc)
