@@ -59,6 +59,13 @@ async function fetchFxRates(){
   }catch(e){return null;}
 }
 
+async function fetchTechnicals(ticker){
+  try{
+    const j=await api(`/api/technicals?symbol=${encodeURIComponent(ticker)}`);
+    return j.data||null;
+  }catch(e){return null;}
+}
+
 // ── DATA ──────────────────────────────────────────────────────
 const CURRENCIES=[
   {code:"GBP",symbol:"£",flag:"🇬🇧",name:"British Pound",fb:1.00},
@@ -490,7 +497,21 @@ function MainApp({user,onLogout}){
   const[watchItems,setWatchItems]=useState([]);
   const[tick,setTick]=useState(0);
   const[saving,setSaving]=useState(false);
+  const[realTech,setRealTech]=useState({});   // { ticker: technicals }
+  const[techLoading,setTechLoading]=useState(false);
   useEffect(()=>{const t=setInterval(()=>setTick(s=>s+1),10000);return()=>clearInterval(t);},[]);
+
+  // Fetch real technicals when user selects an asset
+  useEffect(()=>{
+    if(!selected) return;
+    const t=selected.ticker;
+    if(realTech[t]) return;
+    setTechLoading(true);
+    fetchTechnicals(t).then(data=>{
+      if(data) setRealTech(p=>({...p,[t]:data}));
+      setTechLoading(false);
+    });
+  },[selected]);
 
   useEffect(()=>{
     api("/api/portfolio").then(p=>{
@@ -522,7 +543,10 @@ function MainApp({user,onLogout}){
   const fmtMoney=useCallback((usd)=>{const v=toLocal(usd);return`${activeCurrency.symbol}${v.toFixed(v>1000?2:v>1?2:4)}`;},[toLocal,activeCurrency]);
 
   const doRefresh=useCallback(async()=>{
-    const key=Date.now();const sigs={};
+    // Day-based seed: scores stable for the whole trading day, update at midnight
+    const now=new Date();
+    const key=now.getFullYear()*10000+(now.getMonth()+1)*100+now.getDate();
+    const sigs={};
     ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key);});
     try{
       const[liveData,liveFx]=await Promise.all([fetchLivePrices(ASSETS.map(a=>a.ticker)),fetchFxRates()]);
@@ -687,12 +711,18 @@ function MainApp({user,onLogout}){
             {selected&&allSigs[selected.ticker]&&(()=>{
               const sig=allSigs[selected.ticker],R=RISK_CFG[sig.risk];
               const inWatch=watchItems.some(w=>w.ticker===selected.ticker&&w.status==="watching");
+              const tech=realTech[selected.ticker];
+              // Override simulated values with real ones where available
+              const dispRsi   = tech?.rsi          ?? sig.metrics.rsi;
+              const dispVol   = tech?.volume_ratio  ?? sig.metrics.volume;
+              const dispMacd  = tech?.macd_norm     ?? sig.metrics.macd;
+              const dispVsMA50= tech?.price_vs_ma50 ?? null;
               return(<div style={{borderLeft:"1px solid #0c0c18",overflowY:"auto",padding:14,background:"#04040c",display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                   <div>
                     <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#dde0ff"}}>{selected.ticker}</div>
                     <div style={{fontSize:9,color:"#3a3a55"}}>{selected.name} · {selected.sub}</div>
-                    <div style={{display:"flex",gap:4,marginTop:3,flexWrap:"wrap"}}><Tag color={CAP_COLORS[selected.cap]}>{selected.cap} Cap</Tag><Tag color="#5a5a8a">{selected.sector}</Tag></div>
+                    <div style={{display:"flex",gap:4,marginTop:3,flexWrap:"wrap"}}><Tag color={CAP_COLORS[selected.cap]}>{selected.cap} Cap</Tag><Tag color="#5a5a8a">{selected.sector}</Tag>{tech&&<Tag color="#00e676">✓ REAL DATA</Tag>}{techLoading&&!tech&&<Tag color="#ffd600">⟳ LOADING...</Tag>}</div>
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:17,fontWeight:700,color:"#dde0ff",fontFamily:"monospace"}}>{fmtMoney(sig.price)}</div>
@@ -709,9 +739,15 @@ function MainApp({user,onLogout}){
                   <Stat label="UPSIDE" value={`+${sig.upsidePct}%`} color="#00e676"/>
                   <Stat label="STOP" value={`-${sig.stopPct}%`} color="#ff1744"/>
                   <Stat label="ENTRY Q" value={sig.entryQ} color={sig.entryQ==="IDEAL"?"#00e676":sig.entryQ==="GOOD"?"#00b0ff":sig.entryQ==="FAIR"?"#ffd600":"#ff6d00"}/>
-                  <Stat label="RSI" value={sig.metrics.rsi.toFixed(0)} color={sig.metrics.rsi<30?"#00e676":sig.metrics.rsi>70?"#ff1744":"#c0c0e0"}/>
-                  <Stat label="VOL x" value={sig.metrics.volume.toFixed(1)+"x"} color={sig.metrics.volume>1.5?"#00d4ff":"#c0c0e0"}/>
+                  <Stat label={tech?"RSI ✓":"RSI"} value={dispRsi.toFixed(0)} color={dispRsi<30?"#00e676":dispRsi>70?"#ff1744":"#c0c0e0"}/>
+                  <Stat label={tech?"VOL x ✓":"VOL x"} value={dispVol.toFixed(1)+"x"} color={dispVol>1.5?"#00d4ff":"#c0c0e0"}/>
                 </div>
+                {tech&&dispVsMA50!==null&&(
+                  <div style={{background:"#0a0a16",borderRadius:6,padding:"7px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:8,color:"#2a2a40",letterSpacing:1}}>PRICE VS MA50</span>
+                    <span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:dispVsMA50>0?"#00e676":"#ff1744"}}>{dispVsMA50>0?"+":""}{dispVsMA50.toFixed(1)}%</span>
+                  </div>
+                )}
                 {/* ── BULL/BEAR PANEL ── */}
                 <BullBearPanel sig={sig}/>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
