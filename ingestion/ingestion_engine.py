@@ -12,11 +12,6 @@ Orchestrates the full ingestion pipeline:
   5. Deactivate delisted assets
   6. Notify the analytical engine of changes
   7. Log everything
-
-This file is the only one that should be run directly.
-  python ingestion_engine.py --mode full
-  python ingestion_engine.py --mode update
-  python ingestion_engine.py --mode validate
 """
 
 import asyncio
@@ -44,16 +39,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("mb-ingestion.engine")
 
-# ── Config (override via environment variables) ────────────────
+# ── Config ─────────────────────────────────────────────────────
 MIN_PRICE        = float(os.environ.get("MIN_PRICE",       "0.50"))
-MIN_ADV_USD      = float(os.environ.get("MIN_ADV_USD",     "500000"))   # $500k daily value
+MIN_ADV_USD      = float(os.environ.get("MIN_ADV_USD",     "500000"))
 SKIP_OTC         = os.environ.get("SKIP_OTC",    "true").lower() == "true"
 SKIP_PENNY       = os.environ.get("SKIP_PENNY",  "true").lower() == "true"
 CONCURRENCY      = int(os.environ.get("FETCH_CONCURRENCY", "5"))
 
-# Engine API base URL — for posting notifications
 ENGINE_API_URL   = os.environ.get("MB_API_URL", "http://localhost:8000")
 ENGINE_API_TOKEN = os.environ.get("MB_BOT_TOKEN", "")
+
+# Sources that are pre-vetted and bypass liquidity filter
+TRUSTED_SOURCES = {"static_seed", "coingecko"}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -61,13 +58,6 @@ ENGINE_API_TOKEN = os.environ.get("MB_BOT_TOKEN", "")
 # ══════════════════════════════════════════════════════════════
 
 async def stage_fetch(mode: str) -> List[dict]:
-    """
-    Stage 1 — Fetch raw asset data from all sources.
-    mode='full'   → all sources, all screener tiers
-    mode='update' → skip screener, only refresh known tickers + static seeds
-    mode='crypto' → crypto only
-    mode='validate' → just validate existing DB tickers
-    """
     yahoo  = YahooFetcher()
     gecko  = CoinGeckoFetcher()
     static = StaticSeedFetcher()
@@ -75,33 +65,27 @@ async def stage_fetch(mode: str) -> List[dict]:
     all_raw = []
 
     if mode in ("full", "update"):
-        # Static seeds always run (fast, no rate limits)
         seeds = await static.fetch()
         all_raw.extend(seeds)
         log.info(f"Seeds: {len(seeds)} assets")
 
-        # Crypto from CoinGecko (more reliable than Yahoo for crypto)
         crypto = await gecko.fetch_top_coins(limit=100)
         all_raw.extend(crypto)
         log.info(f"CoinGecko: {len(crypto)} crypto assets")
 
-        # Forex pairs
         forex = await yahoo.fetch_forex()
         all_raw.extend(forex)
         log.info(f"Forex: {len(forex)} pairs")
 
-        # Commodities
         commodities = await yahoo.fetch_commodities()
         all_raw.extend(commodities)
         log.info(f"Commodities: {len(commodities)} assets")
 
-        # ETFs
         etfs = await yahoo.fetch_etfs()
         all_raw.extend(etfs)
         log.info(f"ETFs: {len(etfs)} assets")
 
     if mode == "full":
-        # Full screener runs — large, mid, small cap equities
         for tier in ["us_large_cap", "us_mid_cap", "us_small_cap"]:
             equities = await yahoo.fetch_equities_screener(tier)
             all_raw.extend(equities)
@@ -113,14 +97,12 @@ async def stage_fetch(mode: str) -> List[dict]:
         all_raw.extend(crypto)
 
     if mode == "update":
-        # Refresh existing DB tickers
         existing = get_all_active_tickers()
         log.info(f"Refreshing {len(existing)} existing tickers from Yahoo")
-        # Batch in groups of 50 to avoid hammering Yahoo
         batches = [existing[i:i+50] for i in range(0, len(existing), 50)]
         for batch in batches:
             refreshed = await yahoo.fetch_tickers_batch(
-                batch, include_summary=False, concurrency=CONCURRENCY
+                batch, concurrency=CONCURRENCY
             )
             all_raw.extend(refreshed)
             await asyncio.sleep(0.5)
@@ -130,12 +112,6 @@ async def stage_fetch(mode: str) -> List[dict]:
 
 
 def stage_deduplicate(raw_assets: List[dict]) -> List[dict]:
-    """
-    Stage 2 — Deduplicate by ticker.
-    Later sources override earlier ones for the same ticker
-    (CoinGecko data is richer for crypto, Yahoo richer for equities).
-    Merge rather than replace where possible.
-    """
     seen: Dict[str, dict] = {}
     for asset in raw_assets:
         ticker = normalise_ticker(
@@ -145,7 +121,6 @@ def stage_deduplicate(raw_assets: List[dict]) -> List[dict]:
         if not ticker:
             continue
         if ticker in seen:
-            # Merge: new values override only if non-null
             existing = seen[ticker]
             for k, v in asset.items():
                 if v is not None and k != "source":
@@ -159,7 +134,6 @@ def stage_deduplicate(raw_assets: List[dict]) -> List[dict]:
 
 
 def stage_classify(raw_assets: List[dict]) -> List[dict]:
-    """Stage 3 — Classify each asset (type, cap tier, volatility tier, sector)."""
     classified = [classify_asset(a) for a in raw_assets]
     log.info(f"Classified: {len(classified)} assets")
     return classified
@@ -167,8 +141,9 @@ def stage_classify(raw_assets: List[dict]) -> List[dict]:
 
 def stage_filter(assets: List[dict]) -> tuple[List[dict], List[dict]]:
     """
-    Stage 4 — Filter out assets that don't meet quality criteria.
-    Returns (passing, rejected) for audit logging.
+    Filter out assets that don't meet quality criteria.
+    Trusted sources (static_seed, coingecko) bypass the liquidity filter
+    because they don't have Yahoo volume data but are pre-vetted.
     """
     passing  = []
     rejected = []
@@ -179,15 +154,26 @@ def stage_filter(assets: List[dict]) -> tuple[List[dict], List[dict]]:
         price      = asset.get("price_last")
         volume     = asset.get("avg_volume_30d")
         exchange   = asset.get("exchange")
+        source     = asset.get("source", "")
 
-        # Exchange filter
+        # Exchange filter — skip OTC
         if SKIP_OTC:
             ok, reason = is_allowed_exchange(exchange)
             if not ok:
                 rejected.append({**asset, "_reject_reason": reason})
                 continue
 
-        # Liquidity / penny filter
+        # ── Trusted sources bypass liquidity filter ──
+        # Static seeds and CoinGecko assets are pre-vetted.
+        # They won't have Yahoo volume data so would otherwise be rejected.
+        if source in TRUSTED_SOURCES:
+            if not asset.get("name"):
+                rejected.append({**asset, "_reject_reason": "missing name"})
+                continue
+            passing.append(asset)
+            continue
+
+        # Standard liquidity / penny filter for Yahoo-sourced assets
         min_price = MIN_PRICE if SKIP_PENNY else 0.0
         ok, reason = is_liquid_enough(
             volume, price, asset_type,
@@ -198,7 +184,6 @@ def stage_filter(assets: List[dict]) -> tuple[List[dict], List[dict]]:
             rejected.append({**asset, "_reject_reason": reason})
             continue
 
-        # Must have a name
         if not asset.get("name"):
             rejected.append({**asset, "_reject_reason": "missing name"})
             continue
@@ -210,10 +195,6 @@ def stage_filter(assets: List[dict]) -> tuple[List[dict], List[dict]]:
 
 
 def stage_store(assets: List[dict], run_id: str, source: str) -> Dict[str, int]:
-    """
-    Stage 5 — Upsert all passing assets into the database.
-    Returns counts of actions taken.
-    """
     stats = {"added": 0, "updated": 0, "errors": 0}
     for asset in assets:
         try:
@@ -231,11 +212,6 @@ async def stage_detect_delistings(
     run_id: str,
     source: str,
 ) -> int:
-    """
-    Stage 6 — Detect delistings.
-    Any ticker that was active in DB but not seen in this run gets validated.
-    If Yahoo confirms it's gone, deactivate it.
-    """
     active_tickers = set(get_all_active_tickers())
     fetched_set    = set(fetched_tickers)
     missing        = active_tickers - fetched_set
@@ -260,42 +236,54 @@ async def stage_detect_delistings(
 
 
 async def stage_notify_engine(run_id: str):
-    """
-    Stage 7 — Push pending notifications to the analytical engine.
-    Engine reads these to update its asset universe.
-    """
+    """Push pending notifications to the main app."""
     try:
         import httpx
         notifications = get_pending_notifications(limit=200)
         if not notifications:
+            log.info("No pending notifications to send")
             return
 
-        headers = {}
+        headers = {"Content-Type": "application/json"}
         if ENGINE_API_TOKEN:
             headers["Authorization"] = f"Bearer {ENGINE_API_TOKEN}"
+
+        sent = 0
+        failed = 0
 
         async with httpx.AsyncClient(timeout=10) as client:
             for notif in notifications:
                 try:
-                    await client.post(
+                    payload = notif.get("payload")
+                    if isinstance(payload, str):
+                        import json
+                        payload = json.loads(payload)
+
+                    resp = await client.post(
                         f"{ENGINE_API_URL}/api/engine/notify",
                         json={
                             "event_type": notif["event_type"],
                             "ticker":     notif["ticker"],
-                            "payload":    notif["payload"],
+                            "payload":    payload or {},
                             "run_id":     run_id,
                         },
                         headers=headers,
                     )
-                except Exception:
-                    pass  # Engine notification is best-effort
+                    if resp.status_code == 200:
+                        sent += 1
+                    else:
+                        log.warning(f"Notify failed for {notif['ticker']}: HTTP {resp.status_code}")
+                        failed += 1
+                except Exception as e:
+                    log.warning(f"Notify error for {notif.get('ticker')}: {e}")
+                    failed += 1
 
         ids = [n["id"] for n in notifications]
         mark_notifications_processed(ids)
-        log.info(f"Notified engine of {len(notifications)} events")
+        log.info(f"Notified engine: {sent} sent, {failed} failed, {len(notifications)} total")
 
     except Exception as e:
-        log.warning(f"Engine notification failed: {e} — will retry next run")
+        log.warning(f"Engine notification stage failed: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -303,10 +291,6 @@ async def stage_notify_engine(run_id: str):
 # ══════════════════════════════════════════════════════════════
 
 async def run_ingestion(mode: str = "update") -> Dict:
-    """
-    Run the full ingestion pipeline.
-    Returns a summary dict with counts and status.
-    """
     run_id = f"run-{int(time.time())}-{uuid.uuid4().hex[:6]}"
     source = f"ingestion_{mode}"
     start  = time.time()
@@ -326,34 +310,25 @@ async def run_ingestion(mode: str = "update") -> Dict:
     }
 
     try:
-        # 1. Fetch
         raw = await stage_fetch(mode)
         stats["fetched"] = len(raw)
 
-        # 2. Deduplicate
         deduped = stage_deduplicate(raw)
-
-        # 3. Classify
         classified = stage_classify(deduped)
-
-        # 4. Filter
         passing, rejected = stage_filter(classified)
         stats["skipped"] = len(rejected)
 
-        # 5. Store
         store_stats = stage_store(passing, run_id, source)
         stats["added"]   = store_stats.get("added", 0)
         stats["updated"] = store_stats.get("updated", 0)
         stats["errors"]  = store_stats.get("errors", 0)
 
-        # 6. Detect delistings (only on full runs — expensive)
         if mode == "full":
             fetched_tickers = [a["ticker"] for a in passing]
             stats["deactivated"] = await stage_detect_delistings(
                 fetched_tickers, run_id, source
             )
 
-        # 7. Notify engine
         await stage_notify_engine(run_id)
 
         elapsed = round(time.time() - start, 1)
@@ -384,37 +359,25 @@ async def run_ingestion(mode: str = "update") -> Dict:
 # ══════════════════════════════════════════════════════════════
 
 async def run_scheduled():
-    """
-    Continuous scheduler.
-    Runs a 'full' ingestion weekly, 'update' daily.
-    Used when deployed as a long-running Railway service.
-    """
     log.info("Ingestion bot started in scheduled mode")
-
-    # Run an update immediately on startup
     await run_ingestion(mode="update")
 
     while True:
         now     = datetime.now(timezone.utc)
-        weekday = now.weekday()   # 0=Monday
+        weekday = now.weekday()
         hour    = now.hour
 
-        # Full run: every Sunday at 02:00 UTC
         if weekday == 6 and hour == 2:
             await run_ingestion(mode="full")
-            await asyncio.sleep(3600)  # sleep 1h to avoid double-run
-
-        # Daily update: every day at 06:00 UTC (market prep)
+            await asyncio.sleep(3600)
         elif hour == 6 and now.minute < 5:
             await run_ingestion(mode="update")
-            await asyncio.sleep(300)   # sleep 5min to avoid double-run
-
+            await asyncio.sleep(300)
         else:
-            await asyncio.sleep(60)    # check every minute
+            await asyncio.sleep(60)
 
 
 def print_status():
-    """Print current universe status to stdout."""
     init_db()
     summary = get_universe_summary()
     runs    = get_recent_runs(5)
@@ -441,14 +404,6 @@ if __name__ == "__main__":
         "--mode",
         choices=["full", "update", "crypto", "validate", "schedule", "status"],
         default="update",
-        help=(
-            "full=all sources + delistings  "
-            "update=refresh existing+seeds  "
-            "crypto=crypto only  "
-            "validate=check tickers  "
-            "schedule=run forever  "
-            "status=print DB status"
-        )
     )
     args = parser.parse_args()
 
