@@ -209,38 +209,9 @@ async def stage_detect_delistings(fetched_tickers: List[str], run_id: str, sourc
 
 
 async def stage_notify_engine(run_id: str):
-    try:
-        import httpx
-        notifications = get_pending_notifications(limit=200)
-        if not notifications:
-            return
-
-        headers = {}
-        if ENGINE_API_TOKEN:
-            headers["Authorization"] = f"Bearer {ENGINE_API_TOKEN}"
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            for notif in notifications:
-                try:
-                    await client.post(
-                        f"{ENGINE_API_URL}/api/engine/notify",
-                        json={
-                            "event_type": notif["event_type"],
-                            "ticker":     notif["ticker"],
-                            "payload":    notif["payload"],
-                            "run_id":     run_id,
-                        },
-                        headers=headers,
-                    )
-                except Exception:
-                    pass
-
-        ids = [n["id"] for n in notifications]
-        mark_notifications_processed(ids)
-        log.info(f"Notified engine of {len(notifications)} events")
-
-    except Exception as e:
-        log.warning(f"Engine notification failed: {e} — will retry next run")
+    # Assets are pushed directly via /api/ingest in complete_run.
+    # This stage is a no-op — /api/engine/notify does not exist.
+    pass
 
 
 # ══════════════════════════════════════════════════════════════
