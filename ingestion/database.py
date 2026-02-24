@@ -32,7 +32,6 @@ DATABASE_PATH = os.environ.get("ASSET_DB_PATH", "/tmp/market_brain_assets.db")
 # CONNECTION
 # ══════════════════════════════════════════════════════════════
 def get_connection() -> sqlite3.Connection:
-    # Ensure the directory exists (important if ASSET_DB_PATH points elsewhere)
     Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -58,49 +57,36 @@ def db():
 # SCHEMA
 # ══════════════════════════════════════════════════════════════
 SCHEMA = """
--- ── Sector reference ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sectors (
     sector          TEXT PRIMARY KEY,
     description     TEXT,
-    etf_proxy       TEXT,        -- e.g. XLK for Technology
+    etf_proxy       TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- ── Master asset universe ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS assets (
     ticker          TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
-    asset_type      TEXT NOT NULL,   -- equity | etf | crypto | forex | index | commodity
+    asset_type      TEXT NOT NULL,
     sector          TEXT,
     industry        TEXT,
     exchange        TEXT,
     country         TEXT DEFAULT 'US',
     currency        TEXT DEFAULT 'USD',
-
-    -- Size / classification
-    market_cap      REAL,            -- in USD
-    market_cap_tier TEXT,            -- Nano | Micro | Small | Mid | Large | Mega
-    volatility_tier TEXT,            -- Low | Med | High | VHigh | Extreme
-
-    -- State
-    active          INTEGER NOT NULL DEFAULT 1,   -- 1=active, 0=delisted
-    tradeable       INTEGER NOT NULL DEFAULT 1,   -- 1=tradeable, 0=suspended
-
-    -- Price range context (updated on each ingestion)
+    market_cap      REAL,
+    market_cap_tier TEXT,
+    volatility_tier TEXT,
+    active          INTEGER NOT NULL DEFAULT 1,
+    tradeable       INTEGER NOT NULL DEFAULT 1,
     price_last      REAL,
     price_52w_high  REAL,
     price_52w_low   REAL,
     avg_volume_30d  REAL,
-
-    -- Timestamps
     first_seen      TEXT NOT NULL DEFAULT (datetime('now')),
     last_updated    TEXT NOT NULL DEFAULT (datetime('now')),
     last_active     TEXT,
-
-    -- Source tracking
-    source          TEXT,            -- yahoo | coingecko | manual | etc.
-    source_id       TEXT,            -- external ID if applicable
-
+    source          TEXT,
+    source_id       TEXT,
     FOREIGN KEY (sector) REFERENCES sectors(sector)
 );
 
@@ -109,7 +95,6 @@ CREATE INDEX IF NOT EXISTS idx_assets_type      ON assets(asset_type);
 CREATE INDEX IF NOT EXISTS idx_assets_active    ON assets(active);
 CREATE INDEX IF NOT EXISTS idx_assets_cap_tier  ON assets(market_cap_tier);
 
--- ── Flexible metadata store ───────────────────────────────────
 CREATE TABLE IF NOT EXISTS asset_metadata (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker          TEXT NOT NULL,
@@ -123,15 +108,14 @@ CREATE TABLE IF NOT EXISTS asset_metadata (
 CREATE INDEX IF NOT EXISTS idx_meta_ticker ON asset_metadata(ticker);
 CREATE INDEX IF NOT EXISTS idx_meta_key    ON asset_metadata(key);
 
--- ── Immutable audit log ───────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ingestion_logs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
     run_id          TEXT,
-    action          TEXT NOT NULL,  -- added | updated | deactivated | reactivated | skipped | error
+    action          TEXT NOT NULL,
     ticker          TEXT,
     asset_type      TEXT,
-    details         TEXT,           -- JSON blob
+    details         TEXT,
     source          TEXT
 );
 
@@ -140,12 +124,11 @@ CREATE INDEX IF NOT EXISTS idx_logs_action    ON ingestion_logs(action);
 CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON ingestion_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_run_id    ON ingestion_logs(run_id);
 
--- ── Per-run summary ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ingestion_runs (
     run_id          TEXT PRIMARY KEY,
     started_at      TEXT NOT NULL,
     completed_at    TEXT,
-    status          TEXT NOT NULL DEFAULT 'running',  -- running | completed | failed
+    status          TEXT NOT NULL DEFAULT 'running',
     source          TEXT,
     total_fetched   INTEGER DEFAULT 0,
     added           INTEGER DEFAULT 0,
@@ -156,14 +139,12 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     notes           TEXT
 );
 
--- ── Engine notification queue ─────────────────────────────────
--- Engine polls this table to learn about universe changes
 CREATE TABLE IF NOT EXISTS engine_notifications (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    event_type      TEXT NOT NULL,  -- asset_added | asset_removed | metadata_changed | sector_changed
+    event_type      TEXT NOT NULL,
     ticker          TEXT NOT NULL,
-    payload         TEXT,           -- JSON
+    payload         TEXT,
     processed       INTEGER DEFAULT 0,
     processed_at    TEXT
 );
@@ -218,7 +199,6 @@ def upsert_asset(asset: dict, run_id: str, source: str) -> str:
         ).fetchone()
 
         if existing is None:
-            # New asset
             conn.execute("""
                 INSERT INTO assets (
                     ticker, name, asset_type, sector, industry, exchange,
@@ -239,11 +219,25 @@ def upsert_asset(asset: dict, run_id: str, source: str) -> str:
 
             _log(conn, run_id, "added", ticker, asset.get("asset_type"), source,
                  {"name": asset.get("name"), "sector": asset.get("sector")})
-            _notify(conn, "asset_added", ticker, {"name": asset.get("name"), "sector": asset.get("sector")})
+
+            # ── FIX: send FULL asset record in notification payload ──
+            _notify(conn, "asset_added", ticker, {
+                "name":           asset.get("name", ticker),
+                "asset_type":     asset.get("asset_type", "equity"),
+                "sector":         asset.get("sector"),
+                "industry":       asset.get("industry"),
+                "exchange":       asset.get("exchange"),
+                "country":        asset.get("country", "US"),
+                "currency":       asset.get("currency", "USD"),
+                "market_cap":     asset.get("market_cap"),
+                "cap_tier":       asset.get("market_cap_tier"),
+                "volatility_tier": asset.get("volatility_tier"),
+                "price_last":     asset.get("price_last"),
+                "tags":           [],
+            })
             return "added"
 
         else:
-            # Update existing
             changed_fields = {}
             for field in ["name", "sector", "industry", "market_cap", "market_cap_tier",
                           "volatility_tier", "price_last", "price_52w_high", "price_52w_low",
@@ -275,13 +269,23 @@ def upsert_asset(asset: dict, run_id: str, source: str) -> str:
                 if "sector" in changed_fields:
                     _notify(conn, "sector_changed", ticker, changed_fields["sector"])
                 if "volatility_tier" in changed_fields:
-                    _notify(conn, "metadata_changed", ticker, {"volatility_tier": changed_fields["volatility_tier"]})
+                    _notify(conn, "metadata_changed", ticker,
+                            {"volatility_tier": changed_fields["volatility_tier"]})
+
+                # Also send asset_updated with full record so app stays in sync
+                _notify(conn, "asset_updated", ticker, {
+                    "name":       asset.get("name", ticker),
+                    "asset_type": asset.get("asset_type", "equity"),
+                    "sector":     asset.get("sector"),
+                    "exchange":   asset.get("exchange"),
+                    "cap_tier":   asset.get("market_cap_tier"),
+                    "tags":       [],
+                })
 
             return "updated"
 
 
 def deactivate_asset(ticker: str, run_id: str, source: str, reason: str = "delisted"):
-    """Mark asset as inactive. Never deletes from DB."""
     now = datetime.now(timezone.utc).isoformat()
     with db() as conn:
         conn.execute(
@@ -289,7 +293,7 @@ def deactivate_asset(ticker: str, run_id: str, source: str, reason: str = "delis
             (now, ticker)
         )
         _log(conn, run_id, "deactivated", ticker, None, source, {"reason": reason})
-        _notify(conn, "asset_removed", ticker, {"reason": reason})
+        _notify(conn, "asset_deactivated", ticker, {"reason": reason})
     log.info(f"Deactivated: {ticker} ({reason})")
 
 
@@ -404,8 +408,7 @@ def _notify(conn: sqlite3.Connection, event_type: str, ticker: str, payload: dic
     """, (event_type, ticker, json.dumps(payload)))
 
 
-def get_pending_notifications(limit: int = 100) -> List[Dict]:
-    """Engine calls this to learn about universe changes."""
+def get_pending_notifications(limit: int = 200) -> List[Dict]:
     with db() as conn:
         rows = conn.execute("""
             SELECT * FROM engine_notifications
