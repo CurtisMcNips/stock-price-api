@@ -23,6 +23,21 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 
+# ── Technicals module (local) ─────────────────────────────────
+try:
+    from technicals import get_technicals
+    TECHNICALS_AVAILABLE = True
+except ImportError:
+    TECHNICALS_AVAILABLE = False
+
+# ── Ingestion DB (optional) ───────────────────────────────────
+try:
+    import sqlite3
+    INGESTION_DB = os.environ.get("INGESTION_DB_PATH", "/data/market_brain_assets.db")
+    _ingestion_available = Path(INGESTION_DB).exists()
+except Exception:
+    _ingestion_available = False
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -43,9 +58,9 @@ HEADERS = {
 
 # ── In-memory fallbacks ───────────────────────────────────────
 _memory_cache: Dict[str, dict] = {}
-_memory_users: Dict[str, dict] = {}       # email -> user record
-_memory_tokens: Dict[str, str] = {}       # token -> email
-_memory_portfolios: Dict[str, dict] = {}  # email -> portfolio
+_memory_users: Dict[str, dict] = {}
+_memory_tokens: Dict[str, str] = {}
+_memory_portfolios: Dict[str, dict] = {}
 redis_client: Optional[aioredis.Redis] = None
 
 
@@ -239,80 +254,6 @@ async def save_portfolio_endpoint(data: PortfolioSave, current_user: dict = Depe
     return {"ok": True}
 
 
-# ── Engine notify endpoint ────────────────────────────────────
-class EngineNotification(BaseModel):
-    event_type: str
-    ticker: str
-    payload: Optional[dict] = None
-    run_id: Optional[str] = None
-
-@app.post("/api/engine/notify", tags=["Engine"])
-async def engine_notify(notif: EngineNotification):
-    """
-    Receives asset update notifications from the ingestion engine.
-    Stores asset data in Redis so the frontend can access it.
-    """
-    ticker = notif.ticker.upper().strip()
-    payload = notif.payload or {}
-
-    if notif.event_type in ("asset_added", "asset_updated"):
-        # Store the full asset record in Redis
-        await rset(f"asset:{ticker}", json.dumps({
-            "ticker":     ticker,
-            "name":       payload.get("name", ticker),
-            "asset_type": payload.get("asset_type", "equity"),
-            "sector":     payload.get("sector"),
-            "exchange":   payload.get("exchange"),
-            "cap_tier":   payload.get("cap_tier"),
-            "tags":       payload.get("tags", []),
-            "updated_at": int(time.time()),
-            "run_id":     notif.run_id,
-        }))
-
-        # Keep a master set of all known tickers
-        r = await get_redis()
-        if r:
-            await r.sadd("universe:tickers", ticker)
-
-    elif notif.event_type == "asset_deactivated":
-        r = await get_redis()
-        if r:
-            await r.srem("universe:tickers", ticker)
-        await rdel(f"asset:{ticker}")
-
-    return {"ok": True, "ticker": ticker, "event": notif.event_type}
-
-
-@app.get("/api/universe", tags=["Engine"])
-async def get_universe():
-    """
-    Returns the full list of assets known to the system.
-    This is what the frontend uses to populate the market view
-    instead of the hardcoded asset list.
-    """
-    r = await get_redis()
-    if not r:
-        return {"count": 0, "assets": [], "source": "redis_unavailable"}
-
-    tickers = await r.smembers("universe:tickers")
-    if not tickers:
-        return {"count": 0, "assets": [], "source": "empty"}
-
-    assets = []
-    for ticker in tickers:
-        val = await rget(f"asset:{ticker}")
-        if val:
-            assets.append(json.loads(val))
-
-    assets.sort(key=lambda x: x.get("name", ""))
-    return {
-        "count": len(assets),
-        "assets": assets,
-        "source": "ingestion_engine",
-        "timestamp": int(time.time())
-    }
-
-
 # ── Price cache ───────────────────────────────────────────────
 async def cache_get(key: str) -> Optional[dict]:
     val = await rget(key)
@@ -398,7 +339,13 @@ def normalise_symbol(symbol: str) -> str:
 @app.get("/health")
 async def health():
     r = await get_redis()
-    return {"status": "healthy", "redis": "connected" if r else "memory", "timestamp": int(time.time())}
+    return {
+        "status": "healthy",
+        "redis": "connected" if r else "memory",
+        "technicals": TECHNICALS_AVAILABLE,
+        "ingestion_db": _ingestion_available,
+        "timestamp": int(time.time()),
+    }
 
 @app.get("/api/price/{symbol}", tags=["Prices"])
 async def get_single_price(symbol: str):
@@ -429,6 +376,84 @@ async def search_symbol(q: str = Query(...)):
             return {"query": q, "results": [{"symbol": q["symbol"], "name": q.get("shortname") or q.get("longname"), "exchange": q.get("exchDisp")} for q in quotes if q.get("symbol")]}
     except Exception as e:
         raise HTTPException(500, f"Search failed: {e}")
+
+
+# ── Technicals endpoint ───────────────────────────────────────
+@app.get("/api/technicals", tags=["Technicals"])
+async def technicals(symbol: str = Query(...)):
+    """
+    Returns RSI-14, MACD, volume ratio and price vs MA50 for a ticker.
+    Cached for 15 minutes. Requires technicals.py to be present.
+    """
+    if not TECHNICALS_AVAILABLE:
+        raise HTTPException(503, "Technicals module not available — ensure technicals.py is in the repo root")
+    sym = normalise_symbol(symbol)
+    data = await get_technicals(sym)
+    if not data:
+        raise HTTPException(404, f"Technicals unavailable for {sym} — Yahoo may have rate limited or ticker not found")
+    return {"symbol": sym, "data": data}
+
+
+# ── Universe endpoint (reads from ingestion DB) ───────────────
+@app.get("/api/universe", tags=["Universe"])
+async def get_universe():
+    """
+    Returns all assets collected by the ingestion engine from the SQLite DB.
+    Falls back to empty list if ingestion DB not present — frontend handles this gracefully.
+    """
+    if not _ingestion_available:
+        log.warning(f"Ingestion DB not found at {INGESTION_DB} — returning empty universe")
+        return {"assets": [], "source": "none", "count": 0}
+    try:
+        def _query():
+            conn = sqlite3.connect(INGESTION_DB)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT
+                    ticker,
+                    name,
+                    asset_type,
+                    sector,
+                    industry,
+                    cap_tier,
+                    exchange,
+                    currency,
+                    country,
+                    market_cap,
+                    beta,
+                    pe_ratio,
+                    avg_volume_30d,
+                    fifty_two_week_high,
+                    fifty_two_week_low,
+                    last_updated
+                FROM assets
+                WHERE ticker IS NOT NULL
+                ORDER BY
+                    CASE cap_tier
+                        WHEN 'Mega'  THEN 1
+                        WHEN 'Large' THEN 2
+                        WHEN 'Mid'   THEN 3
+                        WHEN 'Small' THEN 4
+                        WHEN 'Micro' THEN 5
+                        WHEN 'Nano'  THEN 6
+                        ELSE 7
+                    END,
+                    ticker
+            """)
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.close()
+            return rows
+
+        rows = await asyncio.get_event_loop().run_in_executor(None, _query)
+        return {
+            "assets": rows,
+            "source": "ingestion_db",
+            "count": len(rows),
+        }
+    except Exception as e:
+        log.error(f"Universe query failed: {e}")
+        raise HTTPException(500, f"Database error: {e}")
 
 
 # ── WebSocket ─────────────────────────────────────────────────
