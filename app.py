@@ -1053,6 +1053,77 @@ async def save_portfolio_endpoint(data: PortfolioSave, current_user: dict = Depe
     return {"ok": True}
 
 
+# ── Engine notify endpoint ────────────────────────────────────
+class EngineNotification(BaseModel):
+    event_type: str
+    ticker: str
+    payload: Optional[dict] = None
+    run_id: Optional[str] = None
+
+@app.post("/api/engine/notify", tags=["Engine"])
+async def engine_notify(notif: EngineNotification):
+    """
+    Receives asset update notifications from the ingestion engine.
+    Stores asset data in Redis so the frontend can access it.
+    """
+    ticker = notif.ticker.upper().strip()
+    payload = notif.payload or {}
+
+    if notif.event_type in ("asset_added", "asset_updated"):
+        # Store the full asset record in Redis
+        await rset(f"asset:{ticker}", json.dumps({
+            "ticker":     ticker,
+            "name":       payload.get("name", ticker),
+            "asset_type": payload.get("asset_type", "equity"),
+            "sector":     payload.get("sector"),
+            "exchange":   payload.get("exchange"),
+            "cap_tier":   payload.get("cap_tier"),
+            "tags":       payload.get("tags", []),
+            "updated_at": int(time.time()),
+            "run_id":     notif.run_id,
+        }))
+
+        # Keep a master set of all known tickers
+        r = await get_redis()
+        if r:
+            await r.sadd("universe:tickers", ticker)
+
+    elif notif.event_type == "asset_deactivated":
+        r = await get_redis()
+        if r:
+            await r.srem("universe:tickers", ticker)
+        await rdel(f"asset:{ticker}")
+
+    return {"ok": True, "ticker": ticker, "event": notif.event_type}
+
+
+@app.get("/api/universe", tags=["Engine"])
+async def get_universe():
+    """
+    Returns the full list of assets known to the system.
+    This is what the frontend should use to populate the market view.
+    """
+    r = await get_redis()
+    if not r:
+        return {"count": 0, "assets": [], "source": "redis_unavailable"}
+
+    tickers = await r.smembers("universe:tickers")
+    if not tickers:
+        return {"count": 0, "assets": [], "source": "empty"}
+
+    assets = []
+    for ticker in tickers:
+        val = await rget(f"asset:{ticker}")
+        if val:
+            assets.append(json.loads(val))
+
+    assets.sort(key=lambda x: x.get("name", ""))
+    return {
+        "count": len(assets),
+        "assets": assets,
+        "source": "ingestion_engine",
+        "timestamp": int(time.time())
+    }
 # ══════════════════════════════════════════════════════════════
 # PRICE ENDPOINTS  (unchanged)
 # ══════════════════════════════════════════════════════════════
