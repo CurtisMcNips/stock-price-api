@@ -65,7 +65,7 @@ async def stage_fetch(mode: str) -> List[dict]:
         all_raw.extend(seeds)
         log.info(f"Seeds: {len(seeds)} assets")
 
-        crypto = await gecko.fetch_top_coins(limit=100)
+        crypto = await gecko.fetch_top_coins(limit=200)
         all_raw.extend(crypto)
         log.info(f"CoinGecko: {len(crypto)} crypto assets")
 
