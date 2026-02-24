@@ -24,6 +24,7 @@ from typing import Optional, List, Dict, Any
 
 log = logging.getLogger("mb-ingestion.db")
 
+# /tmp is writable on Railway — the default path without /tmp will fail
 DATABASE_PATH = os.environ.get("ASSET_DB_PATH", "/tmp/market_brain_assets.db")
 
 
@@ -31,6 +32,8 @@ DATABASE_PATH = os.environ.get("ASSET_DB_PATH", "/tmp/market_brain_assets.db")
 # CONNECTION
 # ══════════════════════════════════════════════════════════════
 def get_connection() -> sqlite3.Connection:
+    # Ensure the directory exists (important if ASSET_DB_PATH points elsewhere)
+    Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -269,7 +272,6 @@ def upsert_asset(asset: dict, run_id: str, source: str) -> str:
             if changed_fields:
                 _log(conn, run_id, "updated", ticker, asset.get("asset_type"), source,
                      {"changes": changed_fields})
-                # Notify engine of sector/volatility changes specifically
                 if "sector" in changed_fields:
                     _notify(conn, "sector_changed", ticker, changed_fields["sector"])
                 if "volatility_tier" in changed_fields:
@@ -333,10 +335,10 @@ def get_assets(
 ) -> List[Dict]:
     query = "SELECT * FROM assets WHERE 1=1"
     params = []
-    if active_only:     query += " AND active=1"
-    if asset_type:      query += " AND asset_type=?";    params.append(asset_type)
-    if sector:          query += " AND sector=?";        params.append(sector)
-    if cap_tier:        query += " AND market_cap_tier=?"; params.append(cap_tier)
+    if active_only:       query += " AND active=1"
+    if asset_type:        query += " AND asset_type=?";      params.append(asset_type)
+    if sector:            query += " AND sector=?";          params.append(sector)
+    if cap_tier:          query += " AND market_cap_tier=?"; params.append(cap_tier)
     with db() as conn:
         rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
@@ -344,12 +346,12 @@ def get_assets(
 
 def get_universe_summary() -> Dict:
     with db() as conn:
-        total   = conn.execute("SELECT COUNT(*) FROM assets WHERE active=1").fetchone()[0]
-        by_type = conn.execute("SELECT asset_type, COUNT(*) as n FROM assets WHERE active=1 GROUP BY asset_type").fetchall()
-        by_sec  = conn.execute("SELECT sector, COUNT(*) as n FROM assets WHERE active=1 GROUP BY sector").fetchall()
+        total    = conn.execute("SELECT COUNT(*) FROM assets WHERE active=1").fetchone()[0]
+        by_type  = conn.execute("SELECT asset_type, COUNT(*) as n FROM assets WHERE active=1 GROUP BY asset_type").fetchall()
+        by_sec   = conn.execute("SELECT sector, COUNT(*) as n FROM assets WHERE active=1 GROUP BY sector").fetchall()
         inactive = conn.execute("SELECT COUNT(*) FROM assets WHERE active=0").fetchone()[0]
     return {
-        "total_active": total,
+        "total_active":   total,
         "total_inactive": inactive,
         "by_type":   {r["asset_type"]: r["n"] for r in by_type},
         "by_sector": {r["sector"]: r["n"] for r in by_sec if r["sector"]},
