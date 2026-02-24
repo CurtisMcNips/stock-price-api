@@ -1,6 +1,6 @@
 import sys, os
 sys.path.append(os.path.dirname(__file__))
-
+sys.path.append(os.path.join(os.path.dirname(__file__), "ingestion"))
 """
 Market Brain — Ingestion Engine
 ────────────────────────────────
@@ -28,10 +28,10 @@ from database import (
     get_asset, start_run, complete_run, get_recent_runs, get_universe_summary,
     get_pending_notifications, mark_notifications_processed,
 )
-from classifiers import (
+from ingestion.classifiers import (
     classify_asset, is_liquid_enough, is_allowed_exchange, normalise_ticker
 )
-from fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
+from ingestion.fetchers import YahooFetcher, CoinGeckoFetcher, StaticSeedFetcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +39,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("mb-ingestion.engine")
 
-# ── Config ─────────────────────────────────────────────────────
 MIN_PRICE        = float(os.environ.get("MIN_PRICE",       "0.50"))
 MIN_ADV_USD      = float(os.environ.get("MIN_ADV_USD",     "500000"))
 SKIP_OTC         = os.environ.get("SKIP_OTC",    "true").lower() == "true"
@@ -48,9 +47,6 @@ CONCURRENCY      = int(os.environ.get("FETCH_CONCURRENCY", "5"))
 
 ENGINE_API_URL   = os.environ.get("MB_API_URL", "http://localhost:8000")
 ENGINE_API_TOKEN = os.environ.get("MB_BOT_TOKEN", "")
-
-# Sources that are pre-vetted and bypass liquidity filter
-TRUSTED_SOURCES = {"static_seed", "coingecko"}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -102,7 +98,7 @@ async def stage_fetch(mode: str) -> List[dict]:
         batches = [existing[i:i+50] for i in range(0, len(existing), 50)]
         for batch in batches:
             refreshed = await yahoo.fetch_tickers_batch(
-                batch, concurrency=CONCURRENCY
+                batch, include_summary=False, concurrency=CONCURRENCY
             )
             all_raw.extend(refreshed)
             await asyncio.sleep(0.5)
@@ -140,40 +136,21 @@ def stage_classify(raw_assets: List[dict]) -> List[dict]:
 
 
 def stage_filter(assets: List[dict]) -> tuple[List[dict], List[dict]]:
-    """
-    Filter out assets that don't meet quality criteria.
-    Trusted sources (static_seed, coingecko) bypass the liquidity filter
-    because they don't have Yahoo volume data but are pre-vetted.
-    """
     passing  = []
     rejected = []
 
     for asset in assets:
-        ticker     = asset.get("ticker", "")
         asset_type = asset.get("asset_type", "equity")
         price      = asset.get("price_last")
         volume     = asset.get("avg_volume_30d")
         exchange   = asset.get("exchange")
-        source     = asset.get("source", "")
 
-        # Exchange filter — skip OTC
         if SKIP_OTC:
             ok, reason = is_allowed_exchange(exchange)
             if not ok:
                 rejected.append({**asset, "_reject_reason": reason})
                 continue
 
-        # ── Trusted sources bypass liquidity filter ──
-        # Static seeds and CoinGecko assets are pre-vetted.
-        # They won't have Yahoo volume data so would otherwise be rejected.
-        if source in TRUSTED_SOURCES:
-            if not asset.get("name"):
-                rejected.append({**asset, "_reject_reason": "missing name"})
-                continue
-            passing.append(asset)
-            continue
-
-        # Standard liquidity / penny filter for Yahoo-sourced assets
         min_price = MIN_PRICE if SKIP_PENNY else 0.0
         ok, reason = is_liquid_enough(
             volume, price, asset_type,
@@ -207,11 +184,7 @@ def stage_store(assets: List[dict], run_id: str, source: str) -> Dict[str, int]:
     return stats
 
 
-async def stage_detect_delistings(
-    fetched_tickers: List[str],
-    run_id: str,
-    source: str,
-) -> int:
+async def stage_detect_delistings(fetched_tickers: List[str], run_id: str, source: str) -> int:
     active_tickers = set(get_all_active_tickers())
     fetched_set    = set(fetched_tickers)
     missing        = active_tickers - fetched_set
@@ -236,54 +209,38 @@ async def stage_detect_delistings(
 
 
 async def stage_notify_engine(run_id: str):
-    """Push pending notifications to the main app."""
     try:
         import httpx
         notifications = get_pending_notifications(limit=200)
         if not notifications:
-            log.info("No pending notifications to send")
             return
 
-        headers = {"Content-Type": "application/json"}
+        headers = {}
         if ENGINE_API_TOKEN:
             headers["Authorization"] = f"Bearer {ENGINE_API_TOKEN}"
-
-        sent = 0
-        failed = 0
 
         async with httpx.AsyncClient(timeout=10) as client:
             for notif in notifications:
                 try:
-                    payload = notif.get("payload")
-                    if isinstance(payload, str):
-                        import json
-                        payload = json.loads(payload)
-
-                    resp = await client.post(
+                    await client.post(
                         f"{ENGINE_API_URL}/api/engine/notify",
                         json={
                             "event_type": notif["event_type"],
                             "ticker":     notif["ticker"],
-                            "payload":    payload or {},
+                            "payload":    notif["payload"],
                             "run_id":     run_id,
                         },
                         headers=headers,
                     )
-                    if resp.status_code == 200:
-                        sent += 1
-                    else:
-                        log.warning(f"Notify failed for {notif['ticker']}: HTTP {resp.status_code}")
-                        failed += 1
-                except Exception as e:
-                    log.warning(f"Notify error for {notif.get('ticker')}: {e}")
-                    failed += 1
+                except Exception:
+                    pass
 
         ids = [n["id"] for n in notifications]
         mark_notifications_processed(ids)
-        log.info(f"Notified engine: {sent} sent, {failed} failed, {len(notifications)} total")
+        log.info(f"Notified engine of {len(notifications)} events")
 
     except Exception as e:
-        log.warning(f"Engine notification stage failed: {e}")
+        log.warning(f"Engine notification failed: {e} — will retry next run")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -315,6 +272,7 @@ async def run_ingestion(mode: str = "update") -> Dict:
 
         deduped = stage_deduplicate(raw)
         classified = stage_classify(deduped)
+
         passing, rejected = stage_filter(classified)
         stats["skipped"] = len(rejected)
 
@@ -335,7 +293,7 @@ async def run_ingestion(mode: str = "update") -> Dict:
         stats["elapsed_seconds"] = elapsed
         stats["status"] = "completed"
 
-        complete_run(run_id, stats, "completed")
+        await complete_run(run_id, stats, "completed")  # ← await (triggers HTTP flush)
 
         summary = get_universe_summary()
         log.info(
@@ -349,7 +307,7 @@ async def run_ingestion(mode: str = "update") -> Dict:
         log.error(f"Ingestion run failed: {e}", exc_info=True)
         stats["status"] = "failed"
         stats["notes"]  = str(e)
-        await complete_run(run_id, stats, "failed")
+        await complete_run(run_id, stats, "failed")  # ← await (triggers HTTP flush)
 
     return stats
 
@@ -360,7 +318,8 @@ async def run_ingestion(mode: str = "update") -> Dict:
 
 async def run_scheduled():
     log.info("Ingestion bot started in scheduled mode")
-    await complete_run(run_id, stats, "completed")
+
+    await run_ingestion(mode="update")
 
     while True:
         now     = datetime.now(timezone.utc)
