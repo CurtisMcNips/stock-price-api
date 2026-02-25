@@ -147,6 +147,7 @@ class NewsBot(ResearchBot):
                 bull_factors=[], bear_factors=[],
                 summary="No recent news found",
                 confidence=0.3, source="GNews",
+                raw={"article_count": 0, "avg_sentiment": 0.0},
             )
 
         # Score each article
