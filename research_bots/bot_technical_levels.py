@@ -24,7 +24,7 @@ from base import ResearchBot, BotResult
 
 log = logging.getLogger("mb.bots.technicallevels")
 
-POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "phpD3Q34FRcLIb1kphSqBAQjDBWKrb_y")
+POLYGON_API_KEY = os.environ.get("POLYGON_KEY", "phpD3Q34FRcLIb1kphSqBAQjDBWKrb_y")
 POLYGON_BASE    = "https://api.polygon.io/v2"
 YAHOO_CHART     = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 YAHOO_HEADERS   = {
