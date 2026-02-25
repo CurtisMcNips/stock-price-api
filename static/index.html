@@ -69,6 +69,16 @@ async function fetchTechnicals(tickers){
     return Object.keys(results).length>0?results:null;
   }catch(e){return null;}
 }
+async function fetchResearch(ticker){
+  try{
+    const r=await fetch(`/api/research?symbol=${encodeURIComponent(ticker)}`);
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){
+    console.warn("Research bots unavailable",e);
+    return null;
+  }
+}
 
 // ── DATA ──────────────────────────────────────────────────────
 const CURRENCIES=[
@@ -83,70 +93,39 @@ const CURRENCIES=[
   {code:"SGD",symbol:"S$",flag:"🇸🇬",name:"Singapore Dollar",fb:1.71},
   {code:"HKD",symbol:"HK$",flag:"🇭🇰",name:"Hong Kong Dollar",fb:9.93},
 ];
-const ASSETS=[
+
+// Derive priceRange and vol from cap/sector for assets loaded from universe
+function deriveAssetMeta(a){
+  const sector=a.sector||"";
+  const cap=a.cap||"Mid";
+  // vol by cap tier
+  const volMap={Nano:"Extreme",Micro:"VHigh",Small:"High",Mid:"Med",Large:"Low"};
+  // override vol for inherently volatile sectors
+  let vol=volMap[cap]||"Med";
+  if(sector==="Crypto") vol="Extreme";
+  else if(sector==="Forex") vol="Low";
+  // priceRange: wide defaults — live price overrides this anyway
+  const priceRangeMap={Nano:[0.1,5],Micro:[1,20],Small:[2,50],Mid:[20,200],Large:[50,600]};
+  if(sector==="Crypto") return{...a,vol,priceRange:[0.01,100000]};
+  if(sector==="Forex") return{...a,vol,priceRange:[0.5,200]};
+  return{...a,vol,priceRange:priceRangeMap[cap]||[10,200]};
+}
+
+async function fetchUniverse(){
+  try{
+    const j=await api("/api/universe");
+    if(j.assets&&j.assets.length>0) return j.assets.map(deriveAssetMeta);
+  }catch(e){}
+  return null;
+}
+
+// Fallback static list (used only if /api/universe fails)
+const ASSETS_FALLBACK=[
   {ticker:"NVDA",name:"NVIDIA",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[100,200],vol:"Low"},
-  {ticker:"AMD",name:"AMD",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[80,180],vol:"Med"},
-  {ticker:"INTC",name:"Intel",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[18,45],vol:"Med"},
   {ticker:"MSFT",name:"Microsoft",sector:"Technology",sub:"Software",cap:"Large",priceRange:[300,500],vol:"Low"},
-  {ticker:"GOOGL",name:"Alphabet",sector:"Technology",sub:"Software",cap:"Large",priceRange:[140,200],vol:"Low"},
-  {ticker:"META",name:"Meta Platforms",sector:"Technology",sub:"Social Media",cap:"Large",priceRange:[300,600],vol:"Med"},
   {ticker:"AAPL",name:"Apple",sector:"Technology",sub:"Hardware",cap:"Large",priceRange:[150,230],vol:"Low"},
-  {ticker:"SOUN",name:"SoundHound AI",sector:"Technology",sub:"AI / ML",cap:"Micro",priceRange:[3,18],vol:"VHigh"},
-  {ticker:"BBAI",name:"BigBear.ai",sector:"Technology",sub:"AI / ML",cap:"Micro",priceRange:[1,8],vol:"VHigh"},
-  {ticker:"CRWD",name:"CrowdStrike",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[200,380],vol:"Med"},
-  {ticker:"PANW",name:"Palo Alto Networks",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[150,400],vol:"Med"},
-  {ticker:"IONQ",name:"IonQ",sector:"Technology",sub:"Quantum",cap:"Small",priceRange:[6,40],vol:"High"},
-  {ticker:"QUBT",name:"Quantum Computing",sector:"Technology",sub:"Quantum",cap:"Nano",priceRange:[0.5,8],vol:"Extreme"},
-  {ticker:"MRNA",name:"Moderna",sector:"Healthcare",sub:"Pharma",cap:"Mid",priceRange:[35,130],vol:"High"},
-  {ticker:"PFE",name:"Pfizer",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[20,50],vol:"Low"},
-  {ticker:"JNJ",name:"Johnson & Johnson",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[140,175],vol:"Low"},
-  {ticker:"RXRX",name:"Recursion Pharma",sector:"Healthcare",sub:"Biotech",cap:"Small",priceRange:[3,20],vol:"High"},
-  {ticker:"NTLA",name:"Intellia",sector:"Healthcare",sub:"CRISPR",cap:"Small",priceRange:[10,55],vol:"High"},
-  {ticker:"ISRG",name:"Intuitive Surgical",sector:"Healthcare",sub:"MedTech",cap:"Large",priceRange:[300,450],vol:"Low"},
-  {ticker:"XOM",name:"ExxonMobil",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[95,130],vol:"Low"},
-  {ticker:"BP",name:"BP plc",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[25,45],vol:"Low"},
-  {ticker:"CVX",name:"Chevron",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[130,175],vol:"Low"},
-  {ticker:"PLUG",name:"Plug Power",sector:"Energy",sub:"Hydrogen",cap:"Small",priceRange:[1,15],vol:"VHigh"},
-  {ticker:"FSLR",name:"First Solar",sector:"Energy",sub:"Solar",cap:"Mid",priceRange:[100,250],vol:"Med"},
-  {ticker:"NEE",name:"NextEra Energy",sector:"Energy",sub:"Renewables",cap:"Large",priceRange:[50,85],vol:"Low"},
-  {ticker:"GLD",name:"SPDR Gold ETF",sector:"Metals",sub:"Gold",cap:"Large",priceRange:[170,230],vol:"Low"},
-  {ticker:"SLV",name:"iShares Silver ETF",sector:"Metals",sub:"Silver",cap:"Mid",priceRange:[20,35],vol:"Med"},
-  {ticker:"GFI",name:"Gold Fields",sector:"Metals",sub:"Gold Miners",cap:"Mid",priceRange:[10,20],vol:"Med"},
-  {ticker:"FCX",name:"Freeport-McMoRan",sector:"Metals",sub:"Copper",cap:"Large",priceRange:[35,60],vol:"Med"},
-  {ticker:"NUE",name:"Nucor Steel",sector:"Metals",sub:"Steel",cap:"Large",priceRange:[120,180],vol:"Med"},
-  {ticker:"LAC",name:"Lithium Americas",sector:"Minerals",sub:"Lithium",cap:"Small",priceRange:[2,20],vol:"VHigh"},
-  {ticker:"ALB",name:"Albemarle",sector:"Minerals",sub:"Lithium",cap:"Mid",priceRange:[40,150],vol:"High"},
-  {ticker:"UEC",name:"Uranium Energy",sector:"Minerals",sub:"Uranium",cap:"Small",priceRange:[4,12],vol:"High"},
-  {ticker:"NNE",name:"Nano Nuclear Energy",sector:"Minerals",sub:"Nuclear",cap:"Micro",priceRange:[5,45],vol:"Extreme"},
-  {ticker:"BHP",name:"BHP Group",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[40,70],vol:"Low"},
-  {ticker:"RIO",name:"Rio Tinto",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[55,80],vol:"Low"},
-  {ticker:"VALE",name:"Vale SA",sector:"Minerals",sub:"Iron Ore",cap:"Large",priceRange:[10,20],vol:"Med"},
-  {ticker:"BTC-USD",name:"Bitcoin",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[25000,100000],vol:"Extreme"},
-  {ticker:"ETH-USD",name:"Ethereum",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[1500,5000],vol:"Extreme"},
-  {ticker:"SOL-USD",name:"Solana",sector:"Crypto",sub:"Layer 1",cap:"Mid",priceRange:[20,250],vol:"Extreme"},
-  {ticker:"XRP-USD",name:"XRP",sector:"Crypto",sub:"Payments",cap:"Large",priceRange:[0.3,3],vol:"Extreme"},
-  {ticker:"DOGE-USD",name:"Dogecoin",sector:"Crypto",sub:"Meme",cap:"Mid",priceRange:[0.05,0.5],vol:"Extreme"},
-  {ticker:"COIN",name:"Coinbase",sector:"Crypto",sub:"Exchange",cap:"Mid",priceRange:[100,330],vol:"VHigh"},
-  {ticker:"MSTR",name:"MicroStrategy",sector:"Crypto",sub:"BTC Treasury",cap:"Mid",priceRange:[100,600],vol:"Extreme"},
-  {ticker:"EURUSD=X",name:"EUR/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.05,1.15],vol:"Low"},
-  {ticker:"GBPUSD=X",name:"GBP/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.22,1.32],vol:"Low"},
-  {ticker:"USDJPY=X",name:"USD/JPY",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[130,155],vol:"Low"},
-  {ticker:"USDCAD=X",name:"USD/CAD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.30,1.40],vol:"Low"},
-  {ticker:"RKLB",name:"Rocket Lab USA",sector:"Space",sub:"Launch",cap:"Small",priceRange:[4,26],vol:"High"},
-  {ticker:"ASTS",name:"AST SpaceMobile",sector:"Space",sub:"Satellite",cap:"Small",priceRange:[5,40],vol:"VHigh"},
-  {ticker:"LMT",name:"Lockheed Martin",sector:"Space",sub:"Defence",cap:"Large",priceRange:[400,550],vol:"Low"},
-  {ticker:"AMZN",name:"Amazon",sector:"Consumer",sub:"E-Commerce",cap:"Large",priceRange:[120,220],vol:"Med"},
   {ticker:"TSLA",name:"Tesla",sector:"Consumer",sub:"EV",cap:"Large",priceRange:[150,400],vol:"High"},
-  {ticker:"NFLX",name:"Netflix",sector:"Consumer",sub:"Streaming",cap:"Large",priceRange:[400,800],vol:"Med"},
-  {ticker:"GME",name:"GameStop",sector:"Consumer",sub:"Gaming",cap:"Small",priceRange:[8,30],vol:"Extreme"},
-  {ticker:"NKE",name:"Nike",sector:"Consumer",sub:"Apparel",cap:"Large",priceRange:[70,120],vol:"Low"},
-  {ticker:"JPM",name:"JPMorgan Chase",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[150,230],vol:"Low"},
-  {ticker:"GS",name:"Goldman Sachs",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[350,550],vol:"Med"},
-  {ticker:"V",name:"Visa",sector:"Finance",sub:"Payments",cap:"Large",priceRange:[220,310],vol:"Low"},
-  {ticker:"SOFI",name:"SoFi Technologies",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[5,22],vol:"High"},
-  {ticker:"UPST",name:"Upstart Holdings",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[10,80],vol:"VHigh"},
-  {ticker:"ADM",name:"Archer-Daniels",sector:"Agriculture",sub:"Grain",cap:"Large",priceRange:[45,80],vol:"Low"},
-  {ticker:"DE",name:"John Deere",sector:"Agriculture",sub:"Machinery",cap:"Large",priceRange:[350,500],vol:"Low"},
+  {ticker:"BTC-USD",name:"Bitcoin",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[25000,100000],vol:"Extreme"},
 ];
 const CAP_TIERS={Nano:0,Micro:1,Small:2,Mid:3,Large:4};
 const CAP_COLORS={Nano:"#ea80fc",Micro:"#ff6d00",Small:"#ffd600",Mid:"#00e676",Large:"#00b0ff"};
@@ -154,8 +133,8 @@ const RISK_CFG={CRITICAL:{label:"CRITICAL",color:"#ff1744",bg:"#160004"},HIGH:{l
 const TF_PROFILES={"⚡ Intraday":{short:"0-24h",color:"#ff6d00",icon:"⚡",simDays:0.5},"📈 Short Swing":{short:"2-5d",color:"#ffd600",icon:"📈",simDays:3.5},"🌊 Medium Swing":{short:"1-4wk",color:"#00d4ff",icon:"🌊",simDays:17.5},"🏔️ Position":{short:"1-6mo",color:"#00e676",icon:"🏔️",simDays:105},"🌳 Long Term":{short:"6mo+",color:"#aed581",icon:"🌳",simDays:548}};
 const TF_KEYS=Object.keys(TF_PROFILES);
 const WATCH_DURATIONS=[{label:"24 hours",ms:86400000,tf:"⚡ Intraday"},{label:"3 days",ms:259200000,tf:"📈 Short Swing"},{label:"5 days",ms:432000000,tf:"📈 Short Swing"},{label:"1 week",ms:604800000,tf:"🌊 Medium Swing"},{label:"2 weeks",ms:1209600000,tf:"🌊 Medium Swing"},{label:"1 month",ms:2592000000,tf:"🏔️ Position"},{label:"3 months",ms:7776000000,tf:"🏔️ Position"},{label:"6 months",ms:15552000000,tf:"🌳 Long Term"}];
-const SECTORS=["All",...new Set(ASSETS.map(a=>a.sector))];
 const CAPS=["All","Nano","Micro","Small","Mid","Large"];
+// SECTORS computed dynamically from loaded assets
 
 // ── SIGNALS ───────────────────────────────────────────────────
 function sr(seed,min,max){const x=Math.sin(seed+1)*10000;return min+(x-Math.floor(x))*(max-min);}
@@ -412,10 +391,14 @@ function calcAccuracy(trades,watchItems){
 // ── MAIN APP ──────────────────────────────────────────────────
 function MainApp({user,onLogout}){
   const[view,setView]=useState("market");
+  const[assets,setAssets]=useState(ASSETS_FALLBACK);
   const[allSigs,setAllSigs]=useState({});
   const[loading,setLoading]=useState(true);
   const[liveCount,setLiveCount]=useState(0);
   const[techCount,setTechCount]=useState(0);
+  const[research,setResearch]=useState(null);
+  const[researchTicker,setResearchTicker]=useState(null);
+  const[researchLoading,setResearchLoading]=useState(false);
   const[fxRates,setFxRates]=useState(null);
   const[lastUpdated,setLastUpdated]=useState(null);
   const[selected,setSelected]=useState(null);
@@ -436,6 +419,18 @@ function MainApp({user,onLogout}){
   const[tick,setTick]=useState(0);
   const[saving,setSaving]=useState(false);
   useEffect(()=>{const t=setInterval(()=>setTick(s=>s+1),10000);return()=>clearInterval(t);},[]);
+
+  // Load universe from backend (429 assets)
+  useEffect(()=>{
+    fetchUniverse().then(loaded=>{
+      if(loaded&&loaded.length>0){
+        setAssets(loaded);
+        assetsRef.current=loaded;
+        // Re-run refresh now that we have the full universe
+        setTimeout(doRefresh,100);
+      }
+    });
+  },[]);
 
   // Load portfolio
   useEffect(()=>{
@@ -469,9 +464,13 @@ function MainApp({user,onLogout}){
   const fmtMoney=useCallback((usd)=>{const v=toLocal(usd);return`${activeCurrency.symbol}${v.toFixed(v>1000?2:v>1?2:4)}`;},[toLocal,activeCurrency]);
 
   // Refresh — now fetches technicals in parallel
+  const assetsRef=useRef(assets);
+  useEffect(()=>{assetsRef.current=assets;},[assets]);
+
   const doRefresh=useCallback(async()=>{
     const key=Date.now();
-    const tickers=ASSETS.map(a=>a.ticker);
+    const currentAssets=assetsRef.current;
+    const tickers=currentAssets.map(a=>a.ticker);
     try{
       const[liveData,liveFx,techData]=await Promise.all([
         fetchLivePrices(tickers),
@@ -480,10 +479,10 @@ function MainApp({user,onLogout}){
       ]);
       if(liveFx) setFxRates(liveFx);
       const sigs={};
-      ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,techData);});
+      currentAssets.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,techData);});
       if(liveData){
         let cnt=0;
-        ASSETS.forEach(a=>{
+        currentAssets.forEach(a=>{
           if(sigs[a.ticker]){
             const m=mergeLiveData(sigs[a.ticker],liveData,a);
             sigs[a.ticker]=m;
@@ -498,9 +497,8 @@ function MainApp({user,onLogout}){
       }
       setAllSigs(sigs);
     }catch(e){
-      // Fallback: generate with no tech data
       const sigs={};
-      ASSETS.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,null);});
+      currentAssets.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,null);});
       setAllSigs(sigs);
     }
     setLastUpdated(new Date().toLocaleTimeString("en-GB"));
@@ -540,7 +538,8 @@ function MainApp({user,onLogout}){
     }));
   },[allSigs,toLocal]);
 
-  const filtered=useMemo(()=>ASSETS.filter(a=>{
+  const sectors=useMemo(()=>["All",...new Set(assets.map(a=>a.sector))],[assets]);
+  const filtered=useMemo(()=>assets.filter(a=>{
     if(!allSigs[a.ticker]) return false;
     if(activeSector!=="All"&&a.sector!==activeSector) return false;
     if(activeCap!=="All"&&a.cap!==activeCap) return false;
@@ -554,7 +553,7 @@ function MainApp({user,onLogout}){
     if(sortMode==="price_asc") return sa.price-sb.price;
     if(sortMode==="change") return(sb.changePct||0)-(sa.changePct||0);
     return 0;
-  }),[allSigs,activeSector,activeCap,searchQ,sortMode]);
+  }),[assets,allSigs,activeSector,activeCap,searchQ,sortMode]);
 
   if(loading) return(<div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}><div style={{width:40,height:40,border:"3px solid #1a1a2e",borderTop:"3px solid #00b0ff",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{fontSize:11,color:"#3a3a55",letterSpacing:2}}>LOADING MARKET DATA...</div></div>);
 
@@ -604,6 +603,7 @@ function MainApp({user,onLogout}){
         <div style={{marginLeft:"auto",display:"flex",gap:5,alignItems:"center"}}>
           <div style={{fontSize:8,color:liveCount>0?"#00e676":"#3a3a50"}}>● {liveCount} LIVE</div>
           {techCount>0&&<div style={{fontSize:8,color:"#00d4ff"}}>◈ {techCount} TECH</div>}
+          {research&&<div style={{fontSize:8,color:"#00d4aa"}}>◈ LIVE DATA</div>}
           <button onClick={()=>setShowCurrModal(true)} style={{background:"#0a0a16",border:"1px solid #00b0ff44",borderRadius:5,padding:"4px 9px",display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:13}}>{activeCurrency.flag}</span><span style={{fontSize:9,color:"#00b0ff",fontWeight:700}}>{activeCurrency.code}</span></button>
           <button onClick={()=>setShowBudget(true)} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#ffd600",fontSize:8}}>💰 {sym}{balance.toFixed(0)}</button>
           <button onClick={doRefresh} style={{background:"#0a0a16",border:"1px solid #1a1a2e",borderRadius:5,padding:"4px 8px",color:"#5a5a8a",fontSize:11}}>↻</button>
@@ -625,7 +625,7 @@ function MainApp({user,onLogout}){
               {CAPS.map(c=>(<Pill key={c} label={c} active={activeCap===c} color={CAP_COLORS[c]||"#00b0ff"} onClick={()=>setActiveCap(c)}/>))}
             </div>
             <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-              {SECTORS.map(s=>(<Pill key={s} label={s==="All"?"ALL":s.slice(0,7).toUpperCase()} active={activeSector===s} onClick={()=>setActiveSector(s)}/>))}
+              {sectors.map(s=>(<Pill key={s} label={s==="All"?"ALL":s.slice(0,7).toUpperCase()} active={activeSector===s} onClick={()=>setActiveSector(s)}/>))}
               <div style={{marginLeft:"auto",display:"flex",gap:3}}>
                 {[["bestTF","Best"],["score","Score"],["rr","R/R"],["price_asc","Cheap"],["change","Movers"]].map(([v,l])=>(<Pill key={v} label={l} active={sortMode===v} onClick={()=>setSortMode(v)}/>))}
               </div>
@@ -639,7 +639,16 @@ function MainApp({user,onLogout}){
                   const R=RISK_CFG[sig.risk],bP=TF_PROFILES[sig.bestTF],bS=sig.tfScores[sig.bestTF];
                   const pc=bS>=72?"#00e676":bS>=52?"#00d4ff":bS>=35?"#ffd600":"#ff6d00";
                   const isSel=selected?.ticker===a.ticker;
-                  return(<div key={a.ticker} className="card" onClick={()=>setSelected(isSel?null:a)}
+                  return(<div key={a.ticker} className="card" onClick={()=>{
+                    const next=isSel?null:a;
+                    setSelected(next);
+                    if(next&&next.ticker!==researchTicker){
+                      setResearch(null);
+                      setResearchTicker(next.ticker);
+                      setResearchLoading(true);
+                      fetchResearch(next.ticker).then(d=>{setResearch(d);setResearchLoading(false);});
+                    } else if(!next){setResearch(null);setResearchTicker(null);}
+                  }}
                     style={{background:isSel?R.bg:"#07070f",border:`1px solid ${isSel?R.color:"#12121e"}`,borderRadius:7,padding:"9px 10px",cursor:"pointer",position:"relative",overflow:"hidden"}}
                     onMouseEnter={e=>{if(!isSel)e.currentTarget.style.borderColor=R.color+"66";}}
                     onMouseLeave={e=>{if(!isSel)e.currentTarget.style.borderColor="#12121e";}}>
@@ -708,6 +717,51 @@ function MainApp({user,onLogout}){
                     </div>
                   </div>
                 )}
+                {/* RESEARCH BOTS PANEL */}
+                {researchLoading&&(
+                  <div style={{background:"#0a0a16",borderRadius:6,padding:"10px",textAlign:"center",fontSize:8,color:"#3a3a55"}}>
+                    <span style={{animation:"pulse 1s infinite"}}>◈ RUNNING RESEARCH BOTS...</span>
+                  </div>
+                )}
+                {research&&!researchLoading&&(()=>{
+                  // Merge real signal_inputs into scores (overwrite simulated values)
+                  const bullFactors=(research.bull_factors?.length>=1)?research.bull_factors:[];
+                  const bearFactors=(research.bear_factors?.length>=1)?research.bear_factors:[];
+                  const hasBotData=bullFactors.length>0||bearFactors.length>0;
+                  return(
+                    <div style={{background:"#040414",border:"1px solid #00d4aa33",borderRadius:6,padding:10}}>
+                      <div style={{fontSize:7,color:"#00d4aa",letterSpacing:2,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span>◈ LIVE RESEARCH DATA</span>
+                        <span style={{fontSize:6,color:"#2a2a40"}}>{research.bots_run||0} bots · {research.data_points||0} data pts</span>
+                      </div>
+                      {hasBotData&&(<>
+                        {bullFactors.length>0&&(
+                          <div style={{marginBottom:6}}>
+                            <div style={{fontSize:7,color:"#00e676",letterSpacing:1,marginBottom:4}}>▲ BULL FACTORS</div>
+                            {bullFactors.slice(0,4).map((f,i)=>(
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #0a0a14",fontSize:8}}>
+                                <span style={{color:"#8a8aaa"}}>{f.label||f}</span>
+                                {f.value!==undefined&&<span style={{color:"#00e676",fontFamily:"monospace"}}>{f.value}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {bearFactors.length>0&&(
+                          <div>
+                            <div style={{fontSize:7,color:"#ff6d00",letterSpacing:1,marginBottom:4}}>▼ BEAR FACTORS</div>
+                            {bearFactors.slice(0,4).map((f,i)=>(
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #0a0a14",fontSize:8}}>
+                                <span style={{color:"#8a8aaa"}}>{f.label||f}</span>
+                                {f.value!==undefined&&<span style={{color:"#ff6d00",fontFamily:"monospace"}}>{f.value}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>)}
+                      {!hasBotData&&<div style={{fontSize:8,color:"#3a3a55",textAlign:"center"}}>No factor data returned</div>}
+                    </div>
+                  );
+                })()}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
                   <button onClick={()=>setShowWatchModal(true)} disabled={inWatch} style={{background:inWatch?"#1a1a2e":"#ffd60022",border:`1px solid ${inWatch?"#2a2a40":"#ffd600"}`,borderRadius:6,padding:"9px",color:inWatch?"#3a3a50":"#ffd600",fontSize:9,letterSpacing:1}}>{inWatch?"★ WATCHING":"★ WATCH"}</button>
                   <button onClick={()=>setShowTradeModal(true)} disabled={balance<toLocal(sig.price)} style={{background:balance>=toLocal(sig.price)?R.color+"22":"#1a1a2e",border:`1px solid ${balance>=toLocal(sig.price)?R.color:"#2a2a40"}`,borderRadius:6,padding:"9px",color:balance>=toLocal(sig.price)?R.color:"#3a3a50",fontSize:9,letterSpacing:1}}>📈 TRADE</button>
@@ -845,7 +899,7 @@ function MainApp({user,onLogout}){
 
       <div style={{borderTop:"1px solid #0e0e18",padding:"3px 14px",display:"flex",alignItems:"center",gap:10,flexShrink:0,background:"#03030a"}}>
         <span style={{fontSize:7,color:liveCount>0?"#00e676":"#3a3a50",animation:liveCount>0?"pulse 2s infinite":"none"}}>{liveCount>0?"● LIVE":"● SIM"}</span>
-        <span style={{fontSize:7,color:"#2a2a40"}}>{liveCount} live · {techCount} real tech · auto-saves</span>
+        <span style={{fontSize:7,color:"#2a2a40"}}>{liveCount} live · {techCount} real tech · {assets.length} assets · auto-saves</span>
         {lastUpdated&&<span style={{fontSize:7,color:"#1a1a28",marginLeft:"auto"}}>Updated {lastUpdated}</span>}
       </div>
     </div>
