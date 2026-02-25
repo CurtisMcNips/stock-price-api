@@ -20,7 +20,7 @@ from base import ResearchBot, BotResult
 
 log = logging.getLogger("mb.bots.analyst")
 
-FMP_API_KEY   = os.environ.get("FMP_API_KEY", "REi5YWMduTkssRQFsNyEONemYwbbSjro")
+FMP_API_KEY   = os.environ.get("FMP_KEY", "REi5YWMduTkssRQFsNyEONemYwbbSjro")
 FMP_BASE      = "https://financialmodelingprep.com/api/v3"
 YAHOO_SUMMARY = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
 YAHOO_HEADERS = {
