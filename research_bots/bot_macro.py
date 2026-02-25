@@ -28,7 +28,7 @@ from base import ResearchBot, BotResult
 
 log = logging.getLogger("mb.bots.macro")
 
-FRED_API_KEY  = os.environ.get("FRED_API_KEY", "c18ec6200f048fa6f236646d5787ee5f")
+FRED_API_KEY  = os.environ.get("FRED_KEY", "c18ec6200f048fa6f236646d5787ee5f")
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 YAHOO_CHART   = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 YAHOO_HEADERS = {
