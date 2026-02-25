@@ -69,13 +69,21 @@ async function fetchTechnicals(tickers){
     return Object.keys(results).length>0?results:null;
   }catch(e){return null;}
 }
-async function fetchResearch(ticker){
+async function fetchResearch(ticker, name){
   try{
-    const r=await fetch(`/api/research?symbol=${encodeURIComponent(ticker)}`);
+    const url=`/api/research?symbol=${encodeURIComponent(ticker)}&name=${encodeURIComponent(name||ticker)}`;
+    const r=await fetch(url);
     if(!r.ok) return null;
-    return await r.json();
+    const d=await r.json();
+    // If pending (background sweep triggered), poll once after 8s
+    if(d._served_from==="pending"){
+      await new Promise(res=>setTimeout(res,8000));
+      const r2=await fetch(url);
+      if(r2.ok) return await r2.json();
+    }
+    return d;
   }catch(e){
-    console.warn("Research bots unavailable",e);
+    console.warn("Research unavailable",e);
     return null;
   }
 }
@@ -703,7 +711,7 @@ function MainApp({user,onLogout}){
                       setResearch(null);
                       setResearchTicker(next.ticker);
                       setResearchLoading(true);
-                      fetchResearch(next.ticker).then(d=>{setResearch(d);setResearchLoading(false);});
+                      fetchResearch(next.ticker, next.name).then(d=>{setResearch(d);setResearchLoading(false);});
                     } else if(!next){setResearch(null);setResearchTicker(null);}
                   }}
                     style={{background:isSel?R.bg:"#07070f",border:`1px solid ${isSel?R.color:"#12121e"}`,borderRadius:7,padding:"9px 10px",cursor:"pointer",position:"relative",overflow:"hidden"}}
@@ -777,7 +785,7 @@ function MainApp({user,onLogout}){
                 {/* RESEARCH BOTS PANEL */}
                 {researchLoading&&(
                   <div style={{background:"#0a0a16",borderRadius:6,padding:"10px",textAlign:"center",fontSize:8,color:"#3a3a55"}}>
-                    <span style={{animation:"pulse 1s infinite"}}>◈ RUNNING RESEARCH BOTS...</span>
+                    <span style={{animation:"pulse 1s infinite"}}>◈ LOADING RESEARCH DATA....</span>
                   </div>
                 )}
                 {research&&!researchLoading&&(()=>{
@@ -789,7 +797,7 @@ function MainApp({user,onLogout}){
                     <div style={{background:"#040414",border:"1px solid #00d4aa33",borderRadius:6,padding:10}}>
                       <div style={{fontSize:7,color:"#00d4aa",letterSpacing:2,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <span>◈ LIVE RESEARCH DATA</span>
-                        <span style={{fontSize:6,color:"#2a2a40"}}>{research.bots_run||0} bots · {research.data_points||0} data pts</span>
+                        <span style={{fontSize:6,color:"#2a2a40"}}>{(research.meta?.bots_run)||0} bots · {(research.meta?.data_points)||0} pts · {research._age_s?Math.floor((research._age_s||0)/60)+"m ago":"fresh"} · {research.meta?.sweep_cycle||""}</span>
                       </div>
                       {hasBotData&&(<>
                         {bullFactors.length>0&&(
