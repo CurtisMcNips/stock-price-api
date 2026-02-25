@@ -12,7 +12,7 @@ Free tier: 100 requests/day — we cache for 2 hours to stay well within limits.
 GNews has better UK/international coverage than NewsAPI.
 
 Setup:
-  Set GNEWS_API_KEY environment variable.
+  Set GNEWS_KEY environment variable.
   Get a free key at https://gnews.io (personal email accepted).
 
 Catalyst detection:
@@ -34,7 +34,7 @@ from base import ResearchBot, BotResult
 
 log = logging.getLogger("mb.bots.news")
 
-GNEWS_API_KEY = os.environ.get("GNEWS_API_KEY", "c7d8195679eab38431bbd674bb74fd96")
+GNEWS_API_KEY = os.environ.get("GNEWS_KEY", "c7d8195679eab38431bbd674bb74fd96")
 GNEWS_API_URL = "https://gnews.io/api/v4/search"
 CACHE_TTL     = 7200   # 2 hours — conserves 100/day free tier quota
 
@@ -107,7 +107,7 @@ class NewsBot(ResearchBot):
 
     async def _fetch(self, ticker: str, asset_meta: dict) -> BotResult:
         if not GNEWS_API_KEY:
-            return self._empty_result(ticker, "GNEWS_API_KEY not set")
+            return self._empty_result(ticker, "GNEWS_KEY not set")
 
         # Build search query — use company name if available for better results
         company_name = asset_meta.get("name", "")
