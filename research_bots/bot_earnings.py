@@ -23,7 +23,7 @@ from base import ResearchBot, BotResult
 log = logging.getLogger("mb.bots.earnings")
 
 FMP_API_KEY   = os.environ.get("FMP_API_KEY", "REi5YWMduTkssRQFsNyEONemYwbbSjro")
-AV_API_KEY    = os.environ.get("AV_API_KEY",  "KH9A652VHUDYN4SK")
+AV_API_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "KH9A652VHUDYN4SK")
 
 FMP_BASE      = "https://financialmodelingprep.com/api/v3"
 AV_BASE       = "https://www.alphavantage.co/query"
