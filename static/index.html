@@ -122,10 +122,68 @@ async function fetchUniverse(){
 // Fallback static list (used only if /api/universe fails)
 const ASSETS_FALLBACK=[
   {ticker:"NVDA",name:"NVIDIA",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[100,200],vol:"Low"},
+  {ticker:"AMD",name:"AMD",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[80,180],vol:"Med"},
+  {ticker:"INTC",name:"Intel",sector:"Technology",sub:"Semiconductors",cap:"Large",priceRange:[18,45],vol:"Med"},
   {ticker:"MSFT",name:"Microsoft",sector:"Technology",sub:"Software",cap:"Large",priceRange:[300,500],vol:"Low"},
+  {ticker:"GOOGL",name:"Alphabet",sector:"Technology",sub:"Software",cap:"Large",priceRange:[140,200],vol:"Low"},
+  {ticker:"META",name:"Meta Platforms",sector:"Technology",sub:"Social Media",cap:"Large",priceRange:[300,600],vol:"Med"},
   {ticker:"AAPL",name:"Apple",sector:"Technology",sub:"Hardware",cap:"Large",priceRange:[150,230],vol:"Low"},
-  {ticker:"TSLA",name:"Tesla",sector:"Consumer",sub:"EV",cap:"Large",priceRange:[150,400],vol:"High"},
+  {ticker:"SOUN",name:"SoundHound AI",sector:"Technology",sub:"AI / ML",cap:"Micro",priceRange:[3,18],vol:"VHigh"},
+  {ticker:"BBAI",name:"BigBear.ai",sector:"Technology",sub:"AI / ML",cap:"Micro",priceRange:[1,8],vol:"VHigh"},
+  {ticker:"CRWD",name:"CrowdStrike",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[200,380],vol:"Med"},
+  {ticker:"PANW",name:"Palo Alto Networks",sector:"Technology",sub:"Cybersecurity",cap:"Large",priceRange:[150,400],vol:"Med"},
+  {ticker:"IONQ",name:"IonQ",sector:"Technology",sub:"Quantum",cap:"Small",priceRange:[6,40],vol:"High"},
+  {ticker:"QUBT",name:"Quantum Computing",sector:"Technology",sub:"Quantum",cap:"Nano",priceRange:[0.5,8],vol:"Extreme"},
+  {ticker:"MRNA",name:"Moderna",sector:"Healthcare",sub:"Pharma",cap:"Mid",priceRange:[35,130],vol:"High"},
+  {ticker:"PFE",name:"Pfizer",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[20,50],vol:"Low"},
+  {ticker:"JNJ",name:"Johnson & Johnson",sector:"Healthcare",sub:"Pharma",cap:"Large",priceRange:[140,175],vol:"Low"},
+  {ticker:"RXRX",name:"Recursion Pharma",sector:"Healthcare",sub:"Biotech",cap:"Small",priceRange:[3,20],vol:"High"},
+  {ticker:"NTLA",name:"Intellia",sector:"Healthcare",sub:"CRISPR",cap:"Small",priceRange:[10,55],vol:"High"},
+  {ticker:"ISRG",name:"Intuitive Surgical",sector:"Healthcare",sub:"MedTech",cap:"Large",priceRange:[300,450],vol:"Low"},
+  {ticker:"XOM",name:"ExxonMobil",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[95,130],vol:"Low"},
+  {ticker:"BP",name:"BP plc",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[25,45],vol:"Low"},
+  {ticker:"CVX",name:"Chevron",sector:"Energy",sub:"Oil & Gas",cap:"Large",priceRange:[130,175],vol:"Low"},
+  {ticker:"PLUG",name:"Plug Power",sector:"Energy",sub:"Hydrogen",cap:"Small",priceRange:[1,15],vol:"VHigh"},
+  {ticker:"FSLR",name:"First Solar",sector:"Energy",sub:"Solar",cap:"Mid",priceRange:[100,250],vol:"Med"},
+  {ticker:"NEE",name:"NextEra Energy",sector:"Energy",sub:"Renewables",cap:"Large",priceRange:[50,85],vol:"Low"},
+  {ticker:"GLD",name:"SPDR Gold ETF",sector:"Metals",sub:"Gold",cap:"Large",priceRange:[170,230],vol:"Low"},
+  {ticker:"SLV",name:"iShares Silver ETF",sector:"Metals",sub:"Silver",cap:"Mid",priceRange:[20,35],vol:"Med"},
+  {ticker:"GFI",name:"Gold Fields",sector:"Metals",sub:"Gold Miners",cap:"Mid",priceRange:[10,20],vol:"Med"},
+  {ticker:"FCX",name:"Freeport-McMoRan",sector:"Metals",sub:"Copper",cap:"Large",priceRange:[35,60],vol:"Med"},
+  {ticker:"NUE",name:"Nucor Steel",sector:"Metals",sub:"Steel",cap:"Large",priceRange:[120,180],vol:"Med"},
+  {ticker:"LAC",name:"Lithium Americas",sector:"Minerals",sub:"Lithium",cap:"Small",priceRange:[2,20],vol:"VHigh"},
+  {ticker:"ALB",name:"Albemarle",sector:"Minerals",sub:"Lithium",cap:"Mid",priceRange:[40,150],vol:"High"},
+  {ticker:"UEC",name:"Uranium Energy",sector:"Minerals",sub:"Uranium",cap:"Small",priceRange:[4,12],vol:"High"},
+  {ticker:"NNE",name:"Nano Nuclear Energy",sector:"Minerals",sub:"Nuclear",cap:"Micro",priceRange:[5,45],vol:"Extreme"},
+  {ticker:"BHP",name:"BHP Group",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[40,70],vol:"Low"},
+  {ticker:"RIO",name:"Rio Tinto",sector:"Minerals",sub:"Diversified Mining",cap:"Large",priceRange:[55,80],vol:"Low"},
+  {ticker:"VALE",name:"Vale SA",sector:"Minerals",sub:"Iron Ore",cap:"Large",priceRange:[10,20],vol:"Med"},
   {ticker:"BTC-USD",name:"Bitcoin",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[25000,100000],vol:"Extreme"},
+  {ticker:"ETH-USD",name:"Ethereum",sector:"Crypto",sub:"Layer 1",cap:"Large",priceRange:[1500,5000],vol:"Extreme"},
+  {ticker:"SOL-USD",name:"Solana",sector:"Crypto",sub:"Layer 1",cap:"Mid",priceRange:[20,250],vol:"Extreme"},
+  {ticker:"XRP-USD",name:"XRP",sector:"Crypto",sub:"Payments",cap:"Large",priceRange:[0.3,3],vol:"Extreme"},
+  {ticker:"DOGE-USD",name:"Dogecoin",sector:"Crypto",sub:"Meme",cap:"Mid",priceRange:[0.05,0.5],vol:"Extreme"},
+  {ticker:"COIN",name:"Coinbase",sector:"Crypto",sub:"Exchange",cap:"Mid",priceRange:[100,330],vol:"VHigh"},
+  {ticker:"MSTR",name:"MicroStrategy",sector:"Crypto",sub:"BTC Treasury",cap:"Mid",priceRange:[100,600],vol:"Extreme"},
+  {ticker:"EURUSD=X",name:"EUR/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.05,1.15],vol:"Low"},
+  {ticker:"GBPUSD=X",name:"GBP/USD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.22,1.32],vol:"Low"},
+  {ticker:"USDJPY=X",name:"USD/JPY",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[130,155],vol:"Low"},
+  {ticker:"USDCAD=X",name:"USD/CAD",sector:"Forex",sub:"Major Pair",cap:"Large",priceRange:[1.30,1.40],vol:"Low"},
+  {ticker:"RKLB",name:"Rocket Lab USA",sector:"Space",sub:"Launch",cap:"Small",priceRange:[4,26],vol:"High"},
+  {ticker:"ASTS",name:"AST SpaceMobile",sector:"Space",sub:"Satellite",cap:"Small",priceRange:[5,40],vol:"VHigh"},
+  {ticker:"LMT",name:"Lockheed Martin",sector:"Space",sub:"Defence",cap:"Large",priceRange:[400,550],vol:"Low"},
+  {ticker:"AMZN",name:"Amazon",sector:"Consumer",sub:"E-Commerce",cap:"Large",priceRange:[120,220],vol:"Med"},
+  {ticker:"TSLA",name:"Tesla",sector:"Consumer",sub:"EV",cap:"Large",priceRange:[150,400],vol:"High"},
+  {ticker:"NFLX",name:"Netflix",sector:"Consumer",sub:"Streaming",cap:"Large",priceRange:[400,800],vol:"Med"},
+  {ticker:"GME",name:"GameStop",sector:"Consumer",sub:"Gaming",cap:"Small",priceRange:[8,30],vol:"Extreme"},
+  {ticker:"NKE",name:"Nike",sector:"Consumer",sub:"Apparel",cap:"Large",priceRange:[70,120],vol:"Low"},
+  {ticker:"JPM",name:"JPMorgan Chase",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[150,230],vol:"Low"},
+  {ticker:"GS",name:"Goldman Sachs",sector:"Finance",sub:"Banking",cap:"Large",priceRange:[350,550],vol:"Med"},
+  {ticker:"V",name:"Visa",sector:"Finance",sub:"Payments",cap:"Large",priceRange:[220,310],vol:"Low"},
+  {ticker:"SOFI",name:"SoFi Technologies",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[5,22],vol:"High"},
+  {ticker:"UPST",name:"Upstart Holdings",sector:"Finance",sub:"Fintech",cap:"Small",priceRange:[10,80],vol:"VHigh"},
+  {ticker:"ADM",name:"Archer-Daniels",sector:"Agriculture",sub:"Grain",cap:"Large",priceRange:[45,80],vol:"Low"},
+  {ticker:"DE",name:"John Deere",sector:"Agriculture",sub:"Machinery",cap:"Large",priceRange:[350,500],vol:"Low"},
 ];
 const CAP_TIERS={Nano:0,Micro:1,Small:2,Mid:3,Large:4};
 const CAP_COLORS={Nano:"#ea80fc",Micro:"#ff6d00",Small:"#ffd600",Mid:"#00e676",Large:"#00b0ff"};
@@ -420,17 +478,6 @@ function MainApp({user,onLogout}){
   const[saving,setSaving]=useState(false);
   useEffect(()=>{const t=setInterval(()=>setTick(s=>s+1),10000);return()=>clearInterval(t);},[]);
 
-  // Load universe from backend (429 assets)
-  useEffect(()=>{
-    fetchUniverse().then(loaded=>{
-      if(loaded&&loaded.length>0){
-        setAssets(loaded);
-        assetsRef.current=loaded;
-        // Re-run refresh now that we have the full universe
-        setTimeout(doRefresh,100);
-      }
-    });
-  },[]);
 
   // Load portfolio
   useEffect(()=>{
@@ -504,6 +551,16 @@ function MainApp({user,onLogout}){
     setLastUpdated(new Date().toLocaleTimeString("en-GB"));
     setLoading(false);
   },[]);
+  // Load universe from backend (1000+ assets) — MUST be after doRefresh is defined (closure dependency)
+  useEffect(()=>{
+    fetchUniverse().then(loaded=>{
+      if(loaded&&loaded.length>0){
+        setAssets(loaded);
+        assetsRef.current=loaded;
+        setTimeout(doRefresh,200);
+      }
+    });
+  },[doRefresh]);
   useEffect(()=>{doRefresh();},[]);
   useEffect(()=>{const t=setInterval(doRefresh,30000);return()=>clearInterval(t);},[]);
 
