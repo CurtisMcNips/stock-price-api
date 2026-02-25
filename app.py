@@ -11,6 +11,17 @@ import time
 import hashlib
 import hmac
 import base64
+```python
+# Research bots
+import sys as _sys
+_sys.path.insert(0, os.path.join(os.path.dirname(__file__), "research_bots"))
+try:
+    from orchestrator import run_all_bots, run_single_bot
+    BOTS_AVAILABLE = True
+    log.info("Research bots loaded successfully")
+except ImportError as e:
+    BOTS_AVAILABLE = False
+    log.warning(f"Research bots not available: {e}")
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -408,7 +419,11 @@ async def health():
         "redis": "connected" if r else "memory",
         "universe_size": len(universe),
         "timestamp": int(time.time()),
-    }
+  ```python
+"research_bots": BOTS_AVAILABLE,
+"bot_count": 7 if BOTS_AVAILABLE else 0,
+```
+  }
 
 @app.get("/api/price/{symbol}", tags=["Prices"])
 async def get_single_price(symbol: str):
@@ -530,6 +545,38 @@ async def get_technicals(symbols: str = Query(...)):
     fetched = await asyncio.gather(*[fetch_technicals(s, client) for s in sym_list], return_exceptions=True)
     results = {sym: (None if isinstance(r, Exception) else r) for sym, r in zip(sym_list, fetched)}
     return {"count": len(results), "data": results, "timestamp": int(time.time())}
+    ```python
+@app.get("/api/research", tags=["Research"])
+async def research(
+    symbol: str = Query(...),
+    bots:   str = Query(default="all"),
+):
+    """Run research bots for a ticker. Returns signal inputs + bull/bear factors."""
+    if not BOTS_AVAILABLE:
+        raise HTTPException(503, "Research bots not available")
+
+    sym        = normalise_symbol(symbol)
+    asset_meta = {}
+
+    try:
+        universe_raw = await rget("universe:assets")
+        if universe_raw:
+            universe = json.loads(universe_raw)
+            for asset in universe:
+                if asset.get("ticker") == sym:
+                    asset_meta = asset
+                    break
+    except Exception:
+        pass
+
+    if bots == "all":
+        result = await run_all_bots(sym, asset_meta)
+        return result.to_dict()
+    else:
+        single = await run_single_bot(bots.strip(), sym, asset_meta)
+        if not single:
+            raise HTTPException(404, f"Bot '{bots}' not found")
+        return single.to_dict()
 # ── Static / frontend ─────────────────────────────────────────
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
