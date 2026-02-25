@@ -170,16 +170,44 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
 async def lifespan(app: FastAPI):
     await get_redis()
     Path("static").mkdir(exist_ok=True)
+
     # Load research bots
     try:
         import sys
         sys.path.insert(0, "research_bots")
+        sys.path.insert(0, ".")
         from research_bots.orchestrator import get_bots
         bots = get_bots()
         log.info(f"Research bots loaded: {len(bots)}")
     except Exception as e:
         log.warning(f"Research bots not loaded: {e}")
+
+    # Load universe into priority tiers
+    try:
+        from research_engine.orchestrator.priority_tiers import priority_manager
+        raw = await rget("universe:assets")
+        if raw:
+            assets = json.loads(raw)
+            priority_manager.load_universe([a["ticker"] for a in assets if a.get("ticker")])
+            log.info(f"Priority tiers loaded: {priority_manager.summary()}")
+    except Exception as e:
+        log.warning(f"Priority tiers not loaded: {e}")
+
+    # Start research scheduler
+    try:
+        from research_engine.orchestrator.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        log.warning(f"Research scheduler not started: {e}")
+
     yield
+
+    # Shutdown
+    try:
+        from research_engine.orchestrator.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
     if redis_client:
         await redis_client.aclose()
 
@@ -392,14 +420,45 @@ async def search_symbol(q: str = Query(...)):
 
 # ── Research bots endpoint ────────────────────────────────────
 @app.get("/api/research", tags=["Research"])
-async def get_research(symbol: str = Query(...)):
+async def get_research(symbol: str = Query(...), name: str = Query(default="")):
+    """
+    Returns cached research data for a symbol.
+    NEVER makes external API calls — reads Redis only.
+    If cache miss: triggers background sweep and returns pending response.
+    """
     try:
-        from research_bots.orchestrator import run_all_bots
-        asset_meta = {"symbol": symbol}
-        result = await run_all_bots(symbol.upper(), asset_meta)
-        return result.to_dict()
+        from research_engine.api.research_endpoint import get_research_response, record_view
+        asset_meta = {"ticker": symbol, "name": name or symbol}
+        # Record view for priority promotion
+        await record_view(symbol)
+        return await get_research_response(symbol, asset_meta)
     except Exception as e:
-        raise HTTPException(500, f"Research failed: {e}")
+        log.error(f"Research endpoint error for {symbol}: {e}")
+        raise HTTPException(500, f"Research error: {e}")
+
+
+@app.post("/api/research/sweep", tags=["Research"])
+async def trigger_sweep(tier: int = Query(default=1)):
+    """Manually trigger a research sweep (admin use)."""
+    try:
+        from research_engine.orchestrator.scheduler import trigger_sweep_now
+        return await trigger_sweep_now(tier)
+    except Exception as e:
+        raise HTTPException(500, f"Sweep trigger failed: {e}")
+
+
+@app.get("/api/research/scheduler", tags=["Research"])
+async def scheduler_status():
+    """Return research scheduler status and next run times."""
+    try:
+        from research_engine.orchestrator.scheduler import get_scheduler_status
+        from research_engine.orchestrator.priority_tiers import priority_manager
+        return {
+            **get_scheduler_status(),
+            "tiers": priority_manager.summary(),
+        }
+    except Exception as e:
+        return {"running": False, "error": str(e)}
 
 
 # ── WebSocket ─────────────────────────────────────────────────
