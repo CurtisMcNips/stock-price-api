@@ -789,41 +789,125 @@ function MainApp({user,onLogout}){
                   </div>
                 )}
                 {research&&!researchLoading&&(()=>{
-                  // Merge real signal_inputs into scores (overwrite simulated values)
                   const bullFactors=(research.bull_factors?.length>=1)?research.bull_factors:[];
                   const bearFactors=(research.bear_factors?.length>=1)?research.bear_factors:[];
                   const hasBotData=bullFactors.length>0||bearFactors.length>0;
+                  const meta=research.meta||{};
+                  const freshness=meta.freshness||{};
+                  const staleFields=meta.stale_fields||[];
+
+                  // Sweep cycle → human label
+                  const CYCLE_LABELS={
+                    overnight:"Overnight Sweep",uk_premarket:"UK Pre-Market Sweep",
+                    uk_open:"UK Market Open Sweep",uk_midsession:"UK Mid-Session Sweep",
+                    us_premarket:"US Pre-Market Sweep",us_open:"US Market Open Sweep",
+                    us_midsession:"US Mid-Session Sweep",uk_close:"UK Market Close Sweep",
+                    us_close:"US Market Close Sweep",post_market:"Post-Market Sweep",
+                    weekend_prep:"Weekend Prep Sweep",tier3_weekly:"Weekly Sweep",
+                    on_demand:"On-Demand Sweep",manual:"Manual Sweep",pending:"Sweep in progress…",
+                  };
+                  const cycleLabel=CYCLE_LABELS[meta.sweep_cycle]||"Recent Sweep";
+
+                  // Last updated time
+                  const fmtTime=(iso)=>{
+                    if(!iso)return null;
+                    try{return new Date(iso).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});}
+                    catch{return null;}
+                  };
+                  const updatedAt=fmtTime(meta.last_updated);
+
+                  // Freshness per category
+                  const TTL_MS={price:14400000,volume:14400000,news:7200000,
+                    fundamentals:86400000,analyst:86400000,earnings:86400000,
+                    macro:2592000000,sentiment:7200000};
+                  const KEY_MAP={price:"technicals",volume:"technicals",news:"news",
+                    fundamentals:"fundamentals",analyst:"analyst",macro:"macro",sentiment:"news"};
+                  const getFresh=(key)=>{
+                    const rk=KEY_MAP[key]||key;
+                    if(staleFields.includes(rk))return"stale";
+                    const a=freshness[rk];
+                    if(!a)return"fresh";
+                    const m=String(a).match(/^(\d+)([mhd])/);
+                    if(!m)return"fresh";
+                    const ms=parseInt(m[1])*(m[2]==="m"?60000:m[2]==="h"?3600000:86400000);
+                    const ttl=TTL_MS[rk]||TTL_MS.news;
+                    return ms<ttl*0.75?"fresh":ms<ttl*1.1?"cached":"stale";
+                  };
+
+                  const CATS=[
+                    {label:"Price",key:"price"},{label:"Volume",key:"volume"},
+                    {label:"News",key:"news"},{label:"Fundamentals",key:"fundamentals"},
+                    {label:"Macro",key:"macro"},{label:"Analyst",key:"analyst"},
+                    {label:"Sentiment",key:"sentiment"},
+                  ];
+                  const DOT={fresh:{c:"#00e676",t:"Up to date"},cached:{c:"#ffd600",t:"Recently updated — still valid"},stale:{c:"#ff5252",t:"May be outdated"}};
+
+                  const states=CATS.map(c=>getFresh(c.key));
+                  const nStale=states.filter(s=>s==="stale").length;
+                  const nCached=states.filter(s=>s==="cached").length;
+                  const statusLine=nStale>0?"Using last-known-good data for some fields — core signals unaffected.":nCached>2?"Some data cached due to provider limits — core signals unaffected.":nCached>0?"Most data fresh. Some fields recently cached — still valid.":"All data fresh and up to date.";
+
                   return(
-                    <div style={{background:"#040414",border:"1px solid #00d4aa33",borderRadius:6,padding:10}}>
-                      <div style={{fontSize:7,color:"#00d4aa",letterSpacing:2,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span>◈ LIVE RESEARCH DATA</span>
-                        <span style={{fontSize:6,color:"#2a2a40"}}>{(research.meta?.bots_run)||0} bots · {(research.meta?.data_points)||0} pts · {research._age_s?Math.floor((research._age_s||0)/60)+"m ago":"fresh"} · {research.meta?.sweep_cycle||""}</span>
+                    <div>
+                      {/* DATA STATUS PANEL */}
+                      <div style={{background:"#05050e",border:"1px solid #0d0d20",borderRadius:6,padding:"8px 10px",marginBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                          <span style={{fontSize:6,color:"#2a2a48",letterSpacing:1.5,textTransform:"uppercase",fontWeight:600}}>Data Status</span>
+                          {updatedAt&&(
+                            <span style={{fontSize:6.5,color:"#28284a"}}>
+                              {updatedAt}
+                              <span style={{color:"#1e1e38",marginLeft:4}}>· {cycleLabel}</span>
+                            </span>
+                          )}
+                        </div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:"4px 9px",marginBottom:6}}>
+                          {CATS.map(({label,key})=>{
+                            const s=getFresh(key);
+                            const d=DOT[s];
+                            return(
+                              <div key={key} style={{display:"flex",alignItems:"center",gap:3}} title={d.t}>
+                                <div style={{width:5,height:5,borderRadius:"50%",background:d.c,flexShrink:0,
+                                  boxShadow:s==="fresh"?`0 0 4px ${d.c}55`:"none",opacity:s==="stale"?0.5:1}}/>
+                                <span style={{fontSize:7,color:s==="fresh"?"#2a2a46":s==="cached"?"#252535":"#3a1a1a"}}>{label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{borderTop:"1px solid #09091a",paddingTop:5}}>
+                          <div style={{fontSize:6.5,color:"#1e1e36",lineHeight:1.5}}>{statusLine}</div>
+                          <div style={{fontSize:6,color:"#141428",marginTop:1}}>Updated throughout the day using multiple trusted providers.</div>
+                        </div>
                       </div>
-                      {hasBotData&&(<>
-                        {bullFactors.length>0&&(
-                          <div style={{marginBottom:6}}>
-                            <div style={{fontSize:7,color:"#00e676",letterSpacing:1,marginBottom:4}}>▲ BULL FACTORS</div>
-                            {bullFactors.slice(0,4).map((f,i)=>(
-                              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #0a0a14",fontSize:8}}>
-                                <span style={{color:"#8a8aaa"}}>{f.label||f}</span>
-                                {f.value!==undefined&&<span style={{color:"#00e676",fontFamily:"monospace"}}>{f.value}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {bearFactors.length>0&&(
-                          <div>
-                            <div style={{fontSize:7,color:"#ff6d00",letterSpacing:1,marginBottom:4}}>▼ BEAR FACTORS</div>
-                            {bearFactors.slice(0,4).map((f,i)=>(
-                              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #0a0a14",fontSize:8}}>
-                                <span style={{color:"#8a8aaa"}}>{f.label||f}</span>
-                                {f.value!==undefined&&<span style={{color:"#ff6d00",fontFamily:"monospace"}}>{f.value}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>)}
-                      {!hasBotData&&<div style={{fontSize:8,color:"#3a3a55",textAlign:"center"}}>No factor data returned</div>}
+
+                      {/* SIGNALS */}
+                      <div style={{background:"#040414",border:"1px solid #00d4aa1a",borderRadius:6,padding:10,marginBottom:8}}>
+                        <div style={{fontSize:7,color:"#00d4aa88",letterSpacing:2,marginBottom:8}}>◈ SIGNALS</div>
+                        {hasBotData&&(<>
+                          {bullFactors.length>0&&(
+                            <div style={{marginBottom:6}}>
+                              <div style={{fontSize:7,color:"#00e676",letterSpacing:1,marginBottom:4}}>▲ BULL</div>
+                              {bullFactors.slice(0,4).map((f,i)=>(
+                                <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #0a0a14",fontSize:8}}>
+                                  <span style={{color:"#8a8aaa"}}>{f.label||f}</span>
+                                  {f.value!==undefined&&<span style={{color:"#00e676",fontFamily:"monospace"}}>{f.value}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {bearFactors.length>0&&(
+                            <div>
+                              <div style={{fontSize:7,color:"#ff6d00",letterSpacing:1,marginBottom:4}}>▼ BEAR</div>
+                              {bearFactors.slice(0,4).map((f,i)=>(
+                                <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #0a0a14",fontSize:8}}>
+                                  <span style={{color:"#8a8aaa"}}>{f.label||f}</span>
+                                  {f.value!==undefined&&<span style={{color:"#ff6d00",fontFamily:"monospace"}}>{f.value}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>)}
+                        {!hasBotData&&<div style={{fontSize:8,color:"#3a3a55",textAlign:"center",padding:"4px 0"}}>Signals loading — check back shortly.</div>}
+                      </div>
                     </div>
                   );
                 })()}
