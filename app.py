@@ -493,8 +493,24 @@ async def ingest_assets(req: IngestRequest):
         raise HTTPException(400, "No assets provided")
 
     try:
-        # Store full list for /api/universe reads
-        await rset("universe:assets", json.dumps(req.assets))
+        # MERGE into existing universe — ingestion sends ~50 assets per batch
+        # so we must accumulate, not overwrite, or the last batch wins
+        existing_raw = await rget("universe:assets")
+        if existing_raw:
+            try:
+                existing = {a["ticker"]: a for a in json.loads(existing_raw) if a.get("ticker")}
+            except Exception:
+                existing = {}
+        else:
+            existing = {}
+
+        for asset in req.assets:
+            ticker = asset.get("ticker")
+            if ticker:
+                existing[ticker] = asset
+
+        merged = list(existing.values())
+        await rset("universe:assets", json.dumps(merged))
 
         # Store individual keys for per-ticker lookups
         r = await get_redis()
@@ -506,18 +522,16 @@ async def ingest_assets(req: IngestRequest):
                     pipe.set(f"asset:{ticker}", json.dumps(asset))
             await pipe.execute()
 
-        # Reload priority tiers with updated universe
+        # Reload priority tiers with full merged universe
         try:
             from research_engine.orchestrator.priority_tiers import priority_manager
-            priority_manager.load_universe(
-                [a["ticker"] for a in req.assets if a.get("ticker")]
-            )
+            priority_manager.load_universe([a["ticker"] for a in merged if a.get("ticker")])
             log.info(f"Priority tiers reloaded: {priority_manager.summary()}")
         except Exception as e:
             log.warning(f"Priority tier reload failed: {e}")
 
-        log.info(f"Ingested {len(req.assets)} assets")
-        return {"ok": True, "stored": len(req.assets), "ts": int(time.time())}
+        log.info(f"Ingested batch of {len(req.assets)} — universe now {len(merged)} assets")
+        return {"ok": True, "stored": len(req.assets), "universe": len(merged), "ts": int(time.time())}
 
     except Exception as e:
         log.error(f"Ingest error: {e}")
