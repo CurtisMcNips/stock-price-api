@@ -1,13 +1,12 @@
 """
-Market Brain — Main API
-FastAPI backend: auth, prices, universe, ingest, technicals, research engine
+Stock Price API + User Auth + MarketBrain AI Chat
+FastAPI backend with JWT authentication, user accounts, persistent portfolios, and AI chat proxy
 """
 
 import asyncio
 import json
 import logging
 import os
-import sys
 import time
 import hashlib
 import hmac
@@ -18,9 +17,9 @@ from typing import Dict, List, Optional
 
 import httpx
 import redis.asyncio as aioredis
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -28,11 +27,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────
-REDIS_URL      = os.environ.get("REDIS_URL", "redis://localhost:6379")
-SECRET_KEY     = os.environ.get("SECRET_KEY", "change-me-in-production")
-INGEST_API_KEY = os.environ.get("INGEST_API_KEY", "mb-ingest-secret")
-CACHE_TTL      = 5
-TOKEN_TTL      = 60 * 60 * 24 * 30   # 30 days
+REDIS_URL    = os.environ.get("REDIS_URL", "redis://localhost:6379")
+SECRET_KEY   = os.environ.get("SECRET_KEY", "change-me-in-production-railway-env")
+CACHE_TTL    = 5
+TOKEN_TTL    = 60 * 60 * 24 * 30   # 30 days
 REQUEST_TIMEOUT = 8
 
 YAHOO_URL          = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -42,6 +40,65 @@ HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+# ── Anthropic AI Config ───────────────────────────────────────
+# Set ANTHROPIC_API_KEY in Railway → Settings → Variables
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODEL   = "claude-sonnet-4-20250514"
+
+MARKETBRAIN_SYSTEM_PROMPT = """You are MarketBrain AI - the intelligent co-pilot for Market Brain users. Your mission is "Knowledge is Power": empower users with deep insights from the Market Brain system, help them analyze their virtual portfolio, and visualize trades in real-time context.
+
+## CORE IDENTITY & BEHAVIOR
+- Voice: Professional yet approachable trading analyst. Clear, concise, structured. Use bullet points for data. Explain *why* something matters.
+- Role: Research assistant + portfolio coach + signal interpreter. Never give financial advice. Always frame as "analysis" or "what the data shows".
+- Proactive: Surface insights unprompted. Suggest next steps.
+- Transparent: Cite data sources (e.g., "Yahoo technicals", "Research v2 cache").
+- Educational: Every response teaches Market Brain concepts (signals, bots, scoring, timeframes).
+
+## MARKET BRAIN SYSTEM CONTEXT
+Market Brain tracks 1,144 assets (stocks, crypto, forex, ETFs, commodities).
+
+Signal Scoring: -100 to +100 across 5 timeframes:
+- Intraday (0-24h), Short Swing (2-5d), Medium Swing (1-4wk), Position (1-6mo), Long Term (6mo+)
+- Risk labels: CRITICAL / HIGH / MODERATE / OPPORTUNITY / STRONG
+
+6 Research Bots:
+- MacroBot (FRED): sector rotation, rates, inflation
+- FundamentalsBot (FMP): revenue growth, debt ratio, P/E
+- AnalystBot (FMP): buy/hold/sell consensus
+- EarningsBot (FMP+AV): earnings calendar, surprises
+- NewsBot (GNews): sentiment, catalysts
+- TechnicalLevelsBot (Polygon): support/resistance, golden cross
+
+Key signal inputs: RSI, MACD, volume ratio, price vs MA50/MA200, sentiment, short interest, insider buying, catalyst news, sector flow, revenue growth, debt ratio, days to earnings.
+
+Cap Tiers: Nano / Micro / Small / Mid / Large - affects volatility and stop-loss sizing.
+Virtual Portfolio: Users have virtual cash balance, open trades, closed trades, watchlist. 2% risk rule for position sizing.
+
+## RESPONSE FORMAT
+Keep responses concise but structured. Use when relevant:
+- SIGNAL OVERVIEW: score, bestTF, risk label
+- KEY DRIVERS: top bull/bear factors
+- TECHNICALS: RSI, MACD, volume, MA levels
+- INSIGHT: one clear, actionable observation
+
+For portfolio queries:
+- PORTFOLIO SNAPSHOT: balance, P&L, positions
+- RISK CHECK: concentration, drawdown, correlation
+
+## FORMATTING
+- Use **bold** for key numbers and labels
+- Use emoji headers for sections
+- Max ~200 words unless deep analysis is requested
+- Always end with a question or next step
+
+## CONSTRAINTS
+- NO FINANCIAL ADVICE - always frame as analysis only
+- If no real data: "Using simulated data - Tier 1 assets have real data prioritized"
+- Currency: GBP (UK-focused)
+- Confirm trades before logging
+"""
 
 # ── In-memory fallbacks ───────────────────────────────────────
 _memory_cache: Dict[str, dict] = {}
@@ -61,14 +118,12 @@ async def get_redis() -> Optional[aioredis.Redis]:
         except Exception:
             redis_client = None
     try:
-        redis_client = await aioredis.from_url(
-            REDIS_URL, decode_responses=True, socket_timeout=2
-        )
+        redis_client = await aioredis.from_url(REDIS_URL, decode_responses=True, socket_timeout=2)
         await redis_client.ping()
         log.info("Redis connected")
         return redis_client
     except Exception as e:
-        log.warning(f"Redis unavailable ({e}) — using memory")
+        log.warning(f"Redis unavailable ({e}) - using memory")
         return None
 
 
@@ -84,7 +139,7 @@ async def rset(key: str, value: str, ttl: int = 0):
     if r:
         try:
             if ttl: await r.setex(key, ttl, value)
-            else:   await r.set(key, value)
+            else: await r.set(key, value)
             return
         except: pass
 
@@ -98,7 +153,7 @@ async def rdel(key: str):
 # ── Auth helpers ──────────────────────────────────────────────
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
-    key  = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
     return base64.b64encode(salt + key).decode()
 
 def verify_password(password: str, stored: str) -> bool:
@@ -143,9 +198,8 @@ async def save_portfolio(email: str, portfolio: dict):
 async def load_portfolio(email: str) -> dict:
     val = await rget(f"portfolio:{email}")
     if val: return json.loads(val)
-    return _memory_portfolios.get(email, {
-        "trades": [], "watchItems": [], "balance": 1000, "startBalance": 1000
-    })
+    if email in _memory_portfolios: return _memory_portfolios[email]
+    return {"trades": [], "watchItems": [], "balance": 1000, "startBalance": 1000}
 
 async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
@@ -160,79 +214,19 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     return user
 
 
-# ── Universe helpers ──────────────────────────────────────────
-async def load_universe() -> dict:
-    """Load universe from Redis as ticker→asset dict."""
-    raw = await rget("universe:assets")
-    if raw:
-        try:
-            assets = json.loads(raw)
-            return {a["ticker"]: a for a in assets if a.get("ticker")}
-        except Exception:
-            pass
-    return {}
-
-
 # ── Lifespan ──────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await get_redis()
     Path("static").mkdir(exist_ok=True)
-
-    # Ensure research_bots is importable
-    sys.path.insert(0, "research_bots")
-    sys.path.insert(0, ".")
-
-    # Load research bots
-    try:
-        from research_bots.orchestrator import get_bots
-        bots = get_bots()
-        log.info(f"Research bots loaded: {len(bots)}")
-    except Exception as e:
-        log.warning(f"Research bots not loaded: {e}")
-
-    # Load universe into priority tiers
-    try:
-        from research_engine.orchestrator.priority_tiers import priority_manager
-        raw = await rget("universe:assets")
-        if raw:
-            assets = json.loads(raw)
-            priority_manager.load_universe([a["ticker"] for a in assets if a.get("ticker")])
-            log.info(f"Priority tiers loaded: {priority_manager.summary()}")
-        else:
-            log.info("universe:assets not in Redis yet — will populate on first ingest")
-    except Exception as e:
-        log.warning(f"Priority tiers not loaded: {e}")
-
-    # Start research scheduler
-    try:
-        from research_engine.orchestrator.scheduler import start_scheduler
-        start_scheduler()
-        log.info("Research scheduler started")
-    except Exception as e:
-        log.warning(f"Research scheduler not started: {e}")
-
     yield
-
-    # Shutdown
-    try:
-        from research_engine.orchestrator.scheduler import stop_scheduler
-        stop_scheduler()
-    except Exception:
-        pass
     if redis_client:
         await redis_client.aclose()
 
 
 # ── App ───────────────────────────────────────────────────────
-app = FastAPI(title="Market Brain API", version="3.0.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="Market Brain API", version="2.0.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
 # ── Pydantic models ───────────────────────────────────────────
@@ -251,20 +245,8 @@ class PortfolioSave(BaseModel):
     balance: float
     startBalance: float
 
-class IngestRequest(BaseModel):
-    api_key: str
-    assets: list
-
-
-# ── Health ────────────────────────────────────────────────────
-@app.get("/health")
-async def health():
-    r = await get_redis()
-    return {
-        "status":    "healthy",
-        "redis":     "connected" if r else "memory",
-        "timestamp": int(time.time()),
-    }
+class AIChatRequest(BaseModel):
+    messages: list  # [{"role": "user"|"assistant", "content": "..."}]
 
 
 # ── Auth endpoints ────────────────────────────────────────────
@@ -277,10 +259,10 @@ async def register(req: RegisterRequest):
     if existing:
         raise HTTPException(409, "Email already registered")
     user = {
-        "name":          req.name.strip(),
-        "email":         email,
+        "name": req.name.strip(),
+        "email": email,
         "password_hash": hash_password(req.password),
-        "created_at":    int(time.time()),
+        "created_at": int(time.time()),
     }
     await save_user(email, user)
     token = make_token(email)
@@ -290,7 +272,7 @@ async def register(req: RegisterRequest):
 @app.post("/api/auth/login", tags=["Auth"])
 async def login(req: LoginRequest):
     email = req.email.lower().strip()
-    user  = await load_user(email)
+    user = await load_user(email)
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
     token = make_token(email)
@@ -314,32 +296,86 @@ async def get_portfolio(current_user: dict = Depends(get_current_user)):
     return await load_portfolio(current_user["email"])
 
 @app.post("/api/portfolio", tags=["Portfolio"])
-async def save_portfolio_endpoint(
-    data: PortfolioSave,
-    current_user: dict = Depends(get_current_user),
-):
+async def save_portfolio_endpoint(data: PortfolioSave, current_user: dict = Depends(get_current_user)):
     await save_portfolio(current_user["email"], data.dict())
     return {"ok": True}
 
 
+# ── AI Chat endpoint ──────────────────────────────────────────
+@app.post("/api/ai-chat", tags=["AI"])
+async def ai_chat(req: AIChatRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Proxy for MarketBrain AI chat. Keeps the Anthropic API key server-side.
+    Requires a valid user session (Bearer token) — only logged-in users can call this.
+
+    Body: { "messages": [{"role": "user", "content": "..."}, ...] }
+    Returns: { "reply": "..." }
+    """
+    if not ANTHROPIC_API_KEY:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "AI chat unavailable — ANTHROPIC_API_KEY not set on server."}
+        )
+
+    messages = req.messages[-20:]  # cap at 20 messages to control costs
+
+    # Validate
+    for msg in messages:
+        if msg.get("role") not in ("user", "assistant"):
+            return JSONResponse(status_code=400, content={"error": f"Invalid role: {msg.get('role')}"})
+        if not isinstance(msg.get("content"), str) or not msg["content"].strip():
+            return JSONResponse(status_code=400, content={"error": "Empty message content."})
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                ANTHROPIC_API_URL,
+                headers={
+                    "x-api-key":         ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type":      "application/json",
+                },
+                json={
+                    "model":    ANTHROPIC_MODEL,
+                    "max_tokens": 1000,
+                    "system":   MARKETBRAIN_SYSTEM_PROMPT,
+                    "messages": messages,
+                }
+            )
+
+        if resp.status_code != 200:
+            log.error(f"Anthropic {resp.status_code}: {resp.text[:200]}")
+            return JSONResponse(status_code=502, content={"error": "AI service error. Try again."})
+
+        data = resp.json()
+        reply = data.get("content", [{}])[0].get("text", "No response.")
+        log.info(f"AI chat ok user={current_user['email']} usage={data.get('usage')}")
+        return {"reply": reply}
+
+    except httpx.TimeoutException:
+        return JSONResponse(status_code=504, content={"error": "AI request timed out. Try again."})
+    except Exception as e:
+        log.error(f"AI chat exception: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Server error: {str(e)}"})
+
+
 # ── Price cache ───────────────────────────────────────────────
 async def cache_get(key: str) -> Optional[dict]:
-    val = await rget(f"cache:{key}")
-    if val:
-        return json.loads(val)
+    val = await rget(key)
+    if val: return json.loads(val)
     entry = _memory_cache.get(key)
     if entry and (time.time() - entry["_ts"]) < CACHE_TTL:
         return entry["data"]
     return None
 
-async def cache_set(key: str, data: dict, ttl: int = CACHE_TTL):
-    await rset(f"cache:{key}", json.dumps(data), ttl)
+async def cache_set(key: str, data: dict):
+    await rset(f"cache:{key}", json.dumps(data), CACHE_TTL)
     _memory_cache[key] = {"data": data, "_ts": time.time()}
 
 
 # ── Yahoo Finance ─────────────────────────────────────────────
 _http_client: Optional[httpx.AsyncClient] = None
-_last_known:  Dict[str, dict] = {}
+_last_known: Dict[str, dict] = {}
 
 async def get_client() -> httpx.AsyncClient:
     global _http_client
@@ -355,38 +391,34 @@ async def fetch_yahoo(symbol: str, client: httpx.AsyncClient) -> Optional[dict]:
         try:
             r = await client.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
             if r.status_code != 200: continue
-            data   = r.json()
+            data = r.json()
             result = data.get("chart", {}).get("result", [])
             if not result: continue
-            meta   = result[0].get("meta", {})
-            price  = meta.get("regularMarketPrice") or meta.get("previousClose")
+            meta = result[0].get("meta", {})
+            price = meta.get("regularMarketPrice") or meta.get("previousClose")
             if not price: continue
-            prev_close   = meta.get("previousClose") or meta.get("chartPreviousClose") or price
-            change       = price - prev_close
-            change_pct   = (change / prev_close * 100) if prev_close else 0
+            prev_close = meta.get("previousClose") or meta.get("chartPreviousClose") or price
+            change = price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
             market_state = meta.get("marketState", "CLOSED")
-            if market_state == "PRE":   price = meta.get("preMarketPrice")  or price
+            if market_state == "PRE": price = meta.get("preMarketPrice") or price
             elif market_state == "POST": price = meta.get("postMarketPrice") or price
             return {
-                "symbol":              symbol,
-                "price":               round(float(price), 4),
-                "change":              round(float(change), 4),
-                "change_pct":          round(float(change_pct), 4),
-                "prev_close":          round(float(prev_close), 4),
-                "currency":            meta.get("currency", "USD"),
-                "market_state":        market_state,
-                "exchange":            meta.get("exchangeName", ""),
-                "name":                meta.get("shortName") or meta.get("longName") or symbol,
-                "volume":              meta.get("regularMarketVolume"),
-                "day_high":            meta.get("regularMarketDayHigh"),
-                "day_low":             meta.get("regularMarketDayLow"),
+                "symbol": symbol, "price": round(float(price), 4),
+                "change": round(float(change), 4), "change_pct": round(float(change_pct), 4),
+                "prev_close": round(float(prev_close), 4),
+                "currency": meta.get("currency", "USD"), "market_state": market_state,
+                "exchange": meta.get("exchangeName", ""),
+                "name": meta.get("shortName") or meta.get("longName") or symbol,
+                "volume": meta.get("regularMarketVolume"),
+                "day_high": meta.get("regularMarketDayHigh"),
+                "day_low": meta.get("regularMarketDayLow"),
                 "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low":  meta.get("fiftyTwoWeekLow"),
-                "timestamp":           int(time.time()),
-                "source":              "yahoo_finance",
+                "fifty_two_week_low": meta.get("fiftyTwoWeekLow"),
+                "timestamp": int(time.time()), "source": "yahoo_finance",
             }
         except httpx.TimeoutException: log.warning(f"Timeout: {symbol}")
-        except Exception as e:         log.warning(f"Error {symbol}: {e}")
+        except Exception as e: log.warning(f"Error {symbol}: {e}")
     return None
 
 async def get_price(symbol: str, client: httpx.AsyncClient) -> dict:
@@ -403,16 +435,17 @@ async def get_price(symbol: str, client: httpx.AsyncClient) -> dict:
 
 def normalise_symbol(symbol: str) -> str:
     symbol = symbol.upper().strip()
-    for prefix, suffix in [
-        ("LON:", ".L"), ("EPA:", ".PA"), ("ETR:", ".DE"),
-        ("AMS:", ".AS"), ("TSX:", ".TO"), ("ASX:", ".AX"),
-    ]:
-        if symbol.startswith(prefix):
-            return symbol[len(prefix):] + suffix
+    for prefix, suffix in [("LON:","\.L"),("EPA:",".PA"),("ETR:",".DE"),("AMS:",".AS"),("TSX:",".TO"),("ASX:",".AX")]:
+        if symbol.startswith(prefix): return symbol[len(prefix):] + suffix
     return symbol
 
 
 # ── Price endpoints ───────────────────────────────────────────
+@app.get("/health")
+async def health():
+    r = await get_redis()
+    return {"status": "healthy", "redis": "connected" if r else "memory", "timestamp": int(time.time())}
+
 @app.get("/api/price/{symbol}", tags=["Prices"])
 async def get_single_price(symbol: str):
     return await get_price(normalise_symbol(symbol), await get_client())
@@ -420,10 +453,10 @@ async def get_single_price(symbol: str):
 @app.get("/api/prices", tags=["Prices"])
 async def get_multiple_prices(symbols: str = Query(...), delay_ms: int = Query(0)):
     raw = [s.strip() for s in symbols.split(",") if s.strip()]
-    if not raw:        raise HTTPException(400, "No symbols")
-    if len(raw) > 50:  raise HTTPException(400, "Max 50 symbols")
+    if not raw: raise HTTPException(400, "No symbols")
+    if len(raw) > 50: raise HTTPException(400, "Max 50 symbols")
     sym_list = [normalise_symbol(s) for s in raw]
-    client   = await get_client()
+    client = await get_client()
     if delay_ms == 0:
         results = await asyncio.gather(*[get_price(s, client) for s in sym_list])
     else:
@@ -431,252 +464,24 @@ async def get_multiple_prices(symbols: str = Query(...), delay_ms: int = Query(0
         for s in sym_list:
             results.append(await get_price(s, client))
             await asyncio.sleep(delay_ms / 1000)
-    return {
-        "symbols":   sym_list,
-        "count":     len(results),
-        "timestamp": int(time.time()),
-        "data":      {r["symbol"]: r for r in results},
-    }
+    return {"symbols": sym_list, "count": len(results), "timestamp": int(time.time()), "data": {r["symbol"]: r for r in results}}
 
 @app.get("/api/search", tags=["Prices"])
 async def search_symbol(q: str = Query(...)):
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=8",
-                headers=HEADERS, timeout=8,
-            )
+            r = await client.get(f"https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=8", headers=HEADERS, timeout=8)
             quotes = r.json().get("quotes", [])
-            return {
-                "query": q,
-                "results": [
-                    {
-                        "symbol":   item["symbol"],
-                        "name":     item.get("shortname") or item.get("longname"),
-                        "exchange": item.get("exchDisp"),
-                    }
-                    for item in quotes if item.get("symbol")
-                ],
-            }
+            return {"query": q, "results": [{"symbol": q["symbol"], "name": q.get("shortname") or q.get("longname"), "exchange": q.get("exchDisp")} for q in quotes if q.get("symbol")]}
     except Exception as e:
         raise HTTPException(500, f"Search failed: {e}")
-
-
-# ── Universe endpoint ─────────────────────────────────────────
-@app.get("/api/universe", tags=["Universe"])
-async def get_universe():
-    """
-    Return all assets in the universe (1,200+).
-    Frontend loads this on startup instead of using a hardcoded asset list.
-    Falls back to empty list if Redis not yet populated (before first ingest).
-    """
-    raw = await rget("universe:assets")
-    if raw:
-        try:
-            assets = json.loads(raw)
-            return {"assets": assets, "count": len(assets), "source": "redis"}
-        except Exception as e:
-            log.error(f"Universe parse error: {e}")
-    return {"assets": [], "count": 0, "source": "empty"}
-
-
-# ── Ingest endpoint ───────────────────────────────────────────
-@app.post("/api/ingest", tags=["Ingest"])
-async def ingest_assets(req: IngestRequest):
-    """
-    Receive assets from the ingestion engine and store in Redis.
-    Called by the ingestion Railway service on each scheduled run.
-    """
-    if req.api_key != INGEST_API_KEY:
-        raise HTTPException(403, "Invalid API key")
-    if not req.assets:
-        raise HTTPException(400, "No assets provided")
-
-    try:
-        # MERGE into existing universe — ingestion sends ~50 assets per batch
-        # so we must accumulate, not overwrite, or the last batch wins
-        existing_raw = await rget("universe:assets")
-        if existing_raw:
-            try:
-                existing = {a["ticker"]: a for a in json.loads(existing_raw) if a.get("ticker")}
-            except Exception:
-                existing = {}
-        else:
-            existing = {}
-
-        for asset in req.assets:
-            ticker = asset.get("ticker")
-            if ticker:
-                existing[ticker] = asset
-
-        merged = list(existing.values())
-        await rset("universe:assets", json.dumps(merged))
-
-        # Store individual keys for per-ticker lookups
-        r = await get_redis()
-        if r:
-            pipe = r.pipeline()
-            for asset in req.assets:
-                ticker = asset.get("ticker")
-                if ticker:
-                    pipe.set(f"asset:{ticker}", json.dumps(asset))
-            await pipe.execute()
-
-        # Reload priority tiers with full merged universe
-        try:
-            from research_engine.orchestrator.priority_tiers import priority_manager
-            priority_manager.load_universe([a["ticker"] for a in merged if a.get("ticker")])
-            log.info(f"Priority tiers reloaded: {priority_manager.summary()}")
-        except Exception as e:
-            log.warning(f"Priority tier reload failed: {e}")
-
-        log.info(f"Ingested batch of {len(req.assets)} — universe now {len(merged)} assets")
-        return {"ok": True, "stored": len(req.assets), "universe": len(merged), "ts": int(time.time())}
-
-    except Exception as e:
-        log.error(f"Ingest error: {e}")
-        raise HTTPException(500, f"Ingest failed: {e}")
-
-
-# ── Technicals endpoint ───────────────────────────────────────
-@app.get("/api/technicals", tags=["Data"])
-async def get_technicals(symbols: str = Query(...)):
-    """
-    Fetch RSI, MACD, volume ratio, and price vs MA50/MA200.
-    Computed from 6-month daily OHLCV. Cached 5 minutes.
-    """
-    syms = [normalise_symbol(s.strip()) for s in symbols.split(",") if s.strip()]
-    if not syms:       raise HTTPException(400, "No symbols provided")
-    if len(syms) > 50: raise HTTPException(400, "Max 50 symbols per request")
-
-    results: dict = {}
-
-    async def fetch_one(sym: str):
-        cached = await cache_get(f"tech:{sym}")
-        if cached:
-            results[sym] = cached
-            return
-
-        urls   = [
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=6mo&interval=1d",
-            f"https://query2.finance.yahoo.com/v8/finance/chart/{sym}?range=6mo&interval=1d",
-        ]
-        client = await get_client()
-
-        for url in urls:
-            try:
-                r = await client.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-                if r.status_code != 200: continue
-                data   = r.json()
-                result = data.get("chart", {}).get("result", [])
-                if not result: continue
-
-                quote   = result[0].get("indicators", {}).get("quote", [{}])[0]
-                closes  = [c for c in (quote.get("close",  []) or []) if c is not None]
-                volumes = [v for v in (quote.get("volume", []) or []) if v is not None]
-                if len(closes) < 14: break
-
-                # RSI (14-period)
-                deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-                gains  = [d if d > 0 else 0   for d in deltas]
-                losses = [abs(d) if d < 0 else 0 for d in deltas]
-                avg_g  = sum(gains[-14:])  / 14
-                avg_l  = sum(losses[-14:]) / 14
-                rsi    = 100 - (100 / (1 + avg_g / avg_l)) if avg_l != 0 else 50
-
-                # MACD normalised
-                def ema(prices, period):
-                    k = 2 / (period + 1); v = prices[0]
-                    for p in prices[1:]: v = p * k + v * (1 - k)
-                    return v
-
-                macd_norm = 0
-                if len(closes) >= 26:
-                    macd_norm = (
-                        (ema(closes[-26:], 12) - ema(closes[-26:], 26)) / closes[-1] * 100
-                    ) if closes[-1] else 0
-
-                # Volume ratio
-                vol_ratio = (
-                    volumes[-1] / (sum(volumes[-20:]) / 20)
-                    if len(volumes) >= 20 and sum(volumes[-20:]) > 0 else 1.0
-                )
-
-                # Price vs MAs
-                ma50           = sum(closes[-50:])  / min(50,  len(closes))
-                ma200          = sum(closes[-200:]) / min(200, len(closes))
-                price_vs_ma50  = ((closes[-1] - ma50)  / ma50  * 100) if ma50  else 0
-                price_vs_ma200 = ((closes[-1] - ma200) / ma200 * 100) if ma200 else 0
-
-                tech = {
-                    "rsi":            round(rsi,            2),
-                    "macd":           round(macd_norm,       4),
-                    "volume_ratio":   round(vol_ratio,       3),
-                    "price_vs_ma50":  round(price_vs_ma50,  2),
-                    "price_vs_ma200": round(price_vs_ma200, 2),
-                }
-                await cache_set(f"tech:{sym}", tech, ttl=300)
-                results[sym] = tech
-                return
-
-            except Exception as e:
-                log.warning(f"Technicals error {sym}: {e}")
-                continue
-
-        results[sym] = None
-
-    await asyncio.gather(*[fetch_one(s) for s in syms])
-    return results
-
-
-# ── Research endpoints ────────────────────────────────────────
-@app.get("/api/research", tags=["Research"])
-async def get_research(symbol: str = Query(...), name: str = Query(default="")):
-    """
-    Return cached research for a symbol from Redis.
-    Never makes external API calls — research engine populates on schedule.
-    On cache miss: triggers background sweep, returns pending immediately.
-    """
-    try:
-        from research_engine.api.research_endpoint import get_research_response, record_view
-        asset_meta = {"ticker": symbol, "name": name or symbol}
-        await record_view(symbol)
-        return await get_research_response(symbol, asset_meta)
-    except Exception as e:
-        log.error(f"Research endpoint error for {symbol}: {e}")
-        raise HTTPException(500, f"Research error: {e}")
-
-
-@app.post("/api/research/sweep", tags=["Research"])
-async def trigger_sweep(tier: int = Query(default=1)):
-    """Manually trigger a research sweep for a given tier."""
-    try:
-        from research_engine.orchestrator.scheduler import trigger_sweep_now
-        return await trigger_sweep_now(tier)
-    except Exception as e:
-        raise HTTPException(500, f"Sweep trigger failed: {e}")
-
-
-@app.get("/api/research/scheduler", tags=["Research"])
-async def scheduler_status():
-    """Return scheduler status and next run times for all 12 jobs."""
-    try:
-        from research_engine.orchestrator.scheduler import get_scheduler_status
-        from research_engine.orchestrator.priority_tiers import priority_manager
-        return {
-            **get_scheduler_status(),
-            "tiers": priority_manager.summary(),
-        }
-    except Exception as e:
-        return {"running": False, "error": str(e)}
 
 
 # ── WebSocket ─────────────────────────────────────────────────
 class ConnectionManager:
     def __init__(self): self.active: Dict[str, List[WebSocket]] = {}
     async def connect(self, ws: WebSocket, symbol: str):
-        await ws.accept()
-        self.active.setdefault(symbol, []).append(ws)
+        await ws.accept(); self.active.setdefault(symbol, []).append(ws)
     def disconnect(self, ws: WebSocket, symbol: str):
         if symbol in self.active:
             self.active[symbol] = [w for w in self.active[symbol] if w != ws]
@@ -707,8 +512,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_frontend(full_path: str):
     index = Path("static/index.html")
-    if index.exists():
-        return FileResponse(index)
+    if index.exists(): return FileResponse(index)
     return {"status": "ok", "docs": "/docs"}
 
 
