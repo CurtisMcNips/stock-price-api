@@ -102,21 +102,29 @@ const CURRENCIES=[
   {code:"HKD",symbol:"HK$",flag:"🇭🇰",name:"Hong Kong Dollar",fb:9.93},
 ];
 
-// Derive priceRange and vol from cap/sector for assets loaded from universe
+// ── FIX 1: deriveAssetMeta — handles cap_tier vs cap, null sector, missing sub
 function deriveAssetMeta(a){
+  // Normalise cap — Redis ingestion stores cap_tier (e.g. "Unknown","Large"), not cap
+  const VALID_CAPS=["Nano","Micro","Small","Mid","Large"];
+  const capRaw=a.cap||a.cap_tier||"Mid";
+  const cap=VALID_CAPS.includes(capRaw)?capRaw:"Mid";
+  // Normalise sector — ETFs can have null sector
   const sector=a.sector||"";
-  const cap=a.cap||"Mid";
+  // Normalise sub — Redis stores industry not sub
+  const sub=a.sub||a.industry||"";
   // vol by cap tier
   const volMap={Nano:"Extreme",Micro:"VHigh",Small:"High",Mid:"Med",Large:"Low"};
-  // override vol for inherently volatile sectors
   let vol=volMap[cap]||"Med";
   if(sector==="Crypto") vol="Extreme";
   else if(sector==="Forex") vol="Low";
-  // priceRange: wide defaults — live price overrides this anyway
+  // priceRange — always defined, avoids .toFixed() crash in generateSignals
   const priceRangeMap={Nano:[0.1,5],Micro:[1,20],Small:[2,50],Mid:[20,200],Large:[50,600]};
-  if(sector==="Crypto") return{...a,vol,priceRange:[0.01,100000]};
-  if(sector==="Forex") return{...a,vol,priceRange:[0.5,200]};
-  return{...a,vol,priceRange:priceRangeMap[cap]||[10,200]};
+  let priceRange=priceRangeMap[cap]||[10,200];
+  if(sector==="Crypto") priceRange=[0.01,100000];
+  else if(sector==="Forex") priceRange=[0.5,200];
+  else if(sector==="Commodity") priceRange=[1,500];
+  else if(!sector) priceRange=[10,500]; // ETFs/unknown with null sector
+  return{...a,cap,sub,vol,priceRange,sector}; // sector always string, cap always valid
 }
 
 async function fetchUniverse(){
@@ -205,7 +213,9 @@ const CAPS=["All","Nano","Micro","Small","Mid","Large"];
 // ── SIGNALS ───────────────────────────────────────────────────
 function sr(seed,min,max){const x=Math.sin(seed+1)*10000;return min+(x-Math.floor(x))*(max-min);}
 
+// ── FIX 2: null guard at top of generateSignals ───────────────
 function generateSignals(asset,key,techData){
+  if(!asset||!asset.ticker||!asset.priceRange) return null; // guard against malformed assets
   const s=asset.ticker.split("").reduce((a,c)=>a+c.charCodeAt(0),0)+key;
   const r=(min,max,o=0)=>sr(s+o,min,max);
   const capTier=CAP_TIERS[asset.cap]??2;
@@ -518,7 +528,7 @@ function MainApp({user,onLogout}){
   },[fxRates,activeCurrency]);
   const fmtMoney=useCallback((usd)=>{const v=toLocal(usd);return`${activeCurrency.symbol}${v.toFixed(v>1000?2:v>1?2:4)}`;},[toLocal,activeCurrency]);
 
-  // Refresh — now fetches technicals in parallel
+  // Refresh — fetches technicals in parallel
   const assetsRef=useRef(assets);
   useEffect(()=>{assetsRef.current=assets;},[assets]);
 
@@ -534,7 +544,8 @@ function MainApp({user,onLogout}){
       ]);
       if(liveFx) setFxRates(liveFx);
       const sigs={};
-      currentAssets.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,techData);});
+      // ── FIX 3: skip null results from generateSignals (malformed assets) ──
+      currentAssets.forEach(a=>{const sg=generateSignals(a,key,techData);if(sg)sigs[a.ticker]=sg;});
       if(liveData){
         let cnt=0;
         currentAssets.forEach(a=>{
@@ -553,13 +564,13 @@ function MainApp({user,onLogout}){
       setAllSigs(sigs);
     }catch(e){
       const sigs={};
-      currentAssets.forEach(a=>{sigs[a.ticker]=generateSignals(a,key,null);});
+      currentAssets.forEach(a=>{const sg=generateSignals(a,key,null);if(sg)sigs[a.ticker]=sg;});
       setAllSigs(sigs);
     }
     setLastUpdated(new Date().toLocaleTimeString("en-GB"));
     setLoading(false);
   },[]);
-  // Load universe from backend (1000+ assets) — MUST be after doRefresh is defined (closure dependency)
+  // Load universe from backend (1000+ assets) — MUST be after doRefresh is defined
   useEffect(()=>{
     fetchUniverse().then(loaded=>{
       if(loaded&&loaded.length>0){
@@ -796,7 +807,6 @@ function MainApp({user,onLogout}){
                   const freshness=meta.freshness||{};
                   const staleFields=meta.stale_fields||[];
 
-                  // Sweep cycle → human label
                   const CYCLE_LABELS={
                     overnight:"Overnight Sweep",uk_premarket:"UK Pre-Market Sweep",
                     uk_open:"UK Market Open Sweep",uk_midsession:"UK Mid-Session Sweep",
@@ -808,7 +818,6 @@ function MainApp({user,onLogout}){
                   };
                   const cycleLabel=CYCLE_LABELS[meta.sweep_cycle]||"Recent Sweep";
 
-                  // Last updated time
                   const fmtTime=(iso)=>{
                     if(!iso)return null;
                     try{return new Date(iso).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});}
@@ -816,7 +825,6 @@ function MainApp({user,onLogout}){
                   };
                   const updatedAt=fmtTime(meta.last_updated);
 
-                  // Freshness per category
                   const TTL_MS={price:14400000,volume:14400000,news:7200000,
                     fundamentals:86400000,analyst:86400000,earnings:86400000,
                     macro:2592000000,sentiment:7200000};
@@ -849,7 +857,6 @@ function MainApp({user,onLogout}){
 
                   return(
                     <div>
-                      {/* DATA STATUS PANEL */}
                       <div style={{background:"#05050e",border:"1px solid #0d0d20",borderRadius:6,padding:"8px 10px",marginBottom:8}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                           <span style={{fontSize:6,color:"#2a2a48",letterSpacing:1.5,textTransform:"uppercase",fontWeight:600}}>Data Status</span>
@@ -879,7 +886,6 @@ function MainApp({user,onLogout}){
                         </div>
                       </div>
 
-                      {/* SIGNALS */}
                       <div style={{background:"#040414",border:"1px solid #00d4aa1a",borderRadius:6,padding:10,marginBottom:8}}>
                         <div style={{fontSize:7,color:"#00d4aa88",letterSpacing:2,marginBottom:8}}>◈ SIGNALS</div>
                         {hasBotData&&(<>
