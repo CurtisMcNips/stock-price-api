@@ -492,6 +492,8 @@ def normalise_symbol(symbol: str) -> str:
 try:
     import sys as _sys
     _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "research_bots"))
+    from persona_bot import get_persona_bot
+    PERSONA_BOT_AVAILABLE = True
     from orchestrator import run_all_bots as _run_all_bots, run_single_bot as _run_single_bot
     BOTS_AVAILABLE = True
     log.info("Research bots loaded")
@@ -656,6 +658,9 @@ async def sebastian_interpret(req: ChatRequest, current_user: dict = Depends(get
             )
         catalyst_context = "\n".join(cat_summary) if cat_summary else "No active catalysts."
 
+        # Inject live prices from Yahoo Finance
+        live_prices = await get_live_prices_for_catalysts(active_cats)
+
         messages = []
         for h in (req.history or [])[-6:]:
             role = h.get("role", "user")
@@ -684,7 +689,10 @@ async def sebastian_interpret(req: ChatRequest, current_user: dict = Depends(get
                         "Confidence 0-100 decays without new signals. "
                         "Attention: Watch / Focus / Actioned. "
                         "Current live catalyst state:\n" + catalyst_context + "\n"
-                        "Be precise. Never generic. Reference specific catalysts when relevant."
+                        "LIVE PRICES (from Yahoo Finance, fetched now):\n" + live_prices + "\n"
+                        "IMPORTANT: Always use these live prices. Never use memorised or estimated prices. "
+                        "If a ticker's price is not listed above, state you don't have a live price for it. "
+                        "Be precise. Never generic. Reference specific catalysts and their live prices when relevant."
                     ),
                     "messages": messages,
                 },
@@ -820,6 +828,18 @@ async def ingest_signal(signal: CatalystSignal, current_user: dict = Depends(get
     }
     await save_catalyst(cat)
     log.info(f"New catalyst {cat_id} | source={signal.source} dir={signal.direction}")
+    # Persona Bot — generate human summary async (fire-and-forget)
+    async def _gen_persona(c):
+        try:
+            pb = get_persona_bot()
+            if pb:
+                result = await pb.enrich_catalyst_for_storage(c)
+                c["persona_summary"] = result
+                c["updated_at"] = time.time()
+                await save_catalyst(c)
+        except Exception as _e:
+            pass
+    asyncio.create_task(_gen_persona(cat))
     return {"action": "created", "catalyst_id": cat_id, "wave": "spark", "confidence": signal.strength}
 
 
@@ -1042,6 +1062,71 @@ async def cancel_mission(mission_id: str, current_user: dict = Depends(get_curre
 # ═══════════════════════════════════════════════════════════════
 
 PERPLEXITY_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
+
+# ── Live price feed (Yahoo Finance) ──────────────────────────────
+_price_cache: dict = {}
+_price_cache_ttl = 300  # 5 minutes
+
+async def get_live_price(ticker: str) -> Optional[dict]:
+    """
+    Fetch live price from Yahoo Finance for use in Sebastian context.
+    Returns {ticker, price, change_pct, currency} or None.
+    Cached for 5 minutes to avoid hammering Yahoo.
+    """
+    clean = ticker.replace(".L", "").replace("=X", "").replace("=F", "")
+    yf_ticker = ticker  # keep original for Yahoo query
+    now = time.time()
+    if yf_ticker in _price_cache:
+        cached_at, data = _price_cache[yf_ticker]
+        if now - cached_at < _price_cache_ttl:
+            return data
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}"
+        async with httpx.AsyncClient(timeout=8, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r = await client.get(url, params={"interval": "1m", "range": "1d"})
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
+            price        = meta.get("regularMarketPrice")
+            prev_close   = meta.get("chartPreviousClose") or meta.get("previousClose")
+            currency     = meta.get("currency", "USD")
+            exchange     = meta.get("exchangeName", "")
+            if not price:
+                return None
+            change_pct = round(((price - prev_close) / prev_close) * 100, 2) if prev_close else None
+            result = {
+                "ticker": yf_ticker,
+                "price": round(price, 4),
+                "change_pct": change_pct,
+                "currency": currency,
+                "exchange": exchange,
+            }
+            _price_cache[yf_ticker] = (now, result)
+            return result
+    except Exception:
+        return None
+
+async def get_live_prices_for_catalysts(catalysts: list) -> str:
+    """
+    Build a live price context string for Sebastian from active catalyst assets.
+    Only fetches prices for stocks/forex/commodities — not geo scan assets.
+    """
+    tickers = set()
+    for cat in catalysts[:8]:
+        for asset in cat.get("assets", []):
+            if not asset.startswith("GEO:"):
+                tickers.add(asset)
+    if not tickers:
+        return "No live prices available."
+    tasks = [get_live_price(t) for t in list(tickers)[:10]]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    lines = []
+    for r in results:
+        if r and isinstance(r, dict):
+            change = f"{r['change_pct']:+.2f}%" if r.get("change_pct") is not None else "N/A"
+            lines.append(f"{r['ticker']}: {r['currency']} {r['price']} ({change} today)")
+    return "\n".join(lines) if lines else "Live prices temporarily unavailable."
 PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions"
 _perplexity_last_call = 0.0
 PERPLEXITY_RATE_LIMIT = 2.0   # minimum seconds between calls
