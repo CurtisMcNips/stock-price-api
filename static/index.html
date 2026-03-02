@@ -1,639 +1,1048 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Market Brain — Intelligence</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Market Brain</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-:root{
-  --void:#05060a;--surface:#090c12;--panel:#0d1018;--border:#151b26;--border2:#1e2736;
-  --muted:#2a3548;--dim:#3d5068;--text:#c8d8e8;--bright:#e8f0f8;
-  --spark:#f59e0b;--confirmed:#3b82f6;--escalation:#8b5cf6;--structural:#ef4444;--regime:#ff0055;
-  --bull:#10b981;--bear:#f43f5e;--neutral:#64748b;
-  --watch:#f59e0b;--focus:#06b6d4;--actioned:#10b981;
+:root {
+  --bg:        #09090b;
+  --bg2:       #0f1013;
+  --bg3:       #16181d;
+  --bg4:       #1c1f27;
+  --border:    #1e2230;
+  --border2:   #252d40;
+  --text:      #c8d0e0;
+  --text2:     #6b7590;
+  --text3:     #3d4560;
+  --accent:    #3d7fff;
+  --accent-lo: rgba(61,127,255,0.12);
+  --green:     #22d48a;
+  --green-lo:  rgba(34,212,138,0.1);
+  --red:       #e05555;
+  --red-lo:    rgba(224,85,85,0.1);
+  --amber:     #f0a030;
+  --amber-lo:  rgba(240,160,48,0.1);
+  --purple:    #a07aff;
+  --purple-lo: rgba(160,122,255,0.1);
+  --spark:          #4a9de0;
+  --confirmed:      #22d48a;
+  --escalation:     #f0a030;
+  --structural:     #b06aff;
+  --regime:         #e05555;
+  --font: -apple-system, 'SF Pro Display', 'Inter', sans-serif;
+  --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --r: 6px;
 }
-*{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;background:var(--void);color:var(--text);font-family:'Space Mono',monospace;font-size:12px;overflow:hidden;}
-::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border2);}
-.shell{height:100vh;display:grid;grid-template-rows:48px 1fr;}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:14px;z-index:100;}
-.body{display:grid;grid-template-columns:280px 1fr 300px;overflow:hidden;min-height:0;}
-.wordmark{font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:3px;color:var(--bright);white-space:nowrap;}
-.wordmark span{color:var(--spark);}
-.topbar-tabs{display:flex;gap:2px;}
-.tab{padding:6px 14px;font-size:10px;letter-spacing:2px;color:var(--dim);background:transparent;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;font-family:'Space Mono',monospace;}
-.tab.active{color:var(--bright);border-bottom-color:var(--spark);}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
-.pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--bull);animation:pulse-glow 2s infinite;}
-.sys-label{font-size:9px;color:var(--dim);letter-spacing:1.5px;}
-.icon-btn{background:transparent;border:1px solid var(--border2);border-radius:4px;padding:5px 10px;color:var(--dim);font-size:9px;cursor:pointer;letter-spacing:1px;font-family:'Space Mono',monospace;transition:all .15s;}
-.icon-btn:hover{border-color:var(--spark);color:var(--spark);}
-.col-left{border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
-.col-mid{overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
-.col-right{border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
-.col-header{padding:10px 14px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:sticky;top:0;background:var(--surface);z-index:10;}
-.col-title{font-family:'Syne',sans-serif;font-size:10px;font-weight:700;letter-spacing:3px;color:var(--dim);}
-.badge{font-size:9px;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:1px 7px;}
-.filter-bar{display:flex;gap:4px;padding:8px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
-.filter-btn{padding:3px 8px;background:transparent;border:1px solid var(--border2);border-radius:2px;font-size:8px;letter-spacing:1px;color:var(--dim);cursor:pointer;font-family:'Space Mono',monospace;transition:all .15s;}
-.filter-btn.active{background:var(--spark)18;border-color:var(--spark);color:var(--spark);}
-.wave-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:6px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
-.wave-sum-item{text-align:center;}
-.cat-card{padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative;overflow:hidden;transition:background .1s;}
-.cat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;}
-.cat-card.spark::before{background:var(--spark);}
-.cat-card.confirmed::before{background:var(--confirmed);}
-.cat-card.escalation::before{background:var(--escalation);}
-.cat-card.structural::before{background:var(--structural);}
-.cat-card.regime::before{background:var(--regime);}
-.cat-card:hover,.cat-card.sel{background:var(--panel);}
-.cat-title{font-family:'Syne',sans-serif;font-size:11px;font-weight:600;color:var(--bright);line-height:1.3;flex:1;}
-.wave-badge{font-size:8px;letter-spacing:1px;padding:2px 5px;border-radius:2px;font-weight:700;flex-shrink:0;}
-.wave-spark{color:var(--spark);border:1px solid var(--spark)44;background:var(--spark)0f;}
-.wave-confirmed{color:var(--confirmed);border:1px solid var(--confirmed)44;background:var(--confirmed)0f;}
-.wave-escalation{color:var(--escalation);border:1px solid var(--escalation)44;background:var(--escalation)0f;}
-.wave-structural{color:var(--structural);border:1px solid var(--structural)44;background:var(--structural)0f;}
-.wave-regime{color:var(--regime);border:1px solid var(--regime)88;background:var(--regime)18;}
-.dir-tag{font-size:8px;letter-spacing:1px;padding:1px 5px;border-radius:2px;}
-.dir-bull{color:var(--bull);background:var(--bull)15;border:1px solid var(--bull)33;}
-.dir-bear{color:var(--bear);background:var(--bear)15;border:1px solid var(--bear)33;}
-.dir-neutral{color:var(--neutral);background:#ffffff08;border:1px solid var(--muted)44;}
-.conf-bar{flex:1;height:3px;background:var(--border2);border-radius:2px;overflow:hidden;}
-.conf-fill{height:100%;border-radius:2px;transition:width .4s;}
-.attn-dot{width:5px;height:5px;border-radius:50%;}
-.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);}
-.detail-inner{padding:20px;display:flex;flex-direction:column;gap:14px;}
-.sec-title{font-size:9px;letter-spacing:3px;color:var(--dim);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border);}
-.wave-timeline{display:flex;position:relative;margin:4px 0 12px;}
-.wave-timeline::before{content:'';position:absolute;top:9px;left:0;right:0;height:1px;background:var(--border2);}
-.wave-node{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;position:relative;}
-.wdot{width:10px;height:10px;border-radius:50%;border:2px solid var(--border2);background:var(--panel);}
-.wdot.active{border-color:var(--spark);background:var(--spark);box-shadow:0 0 8px var(--spark)88;}
-.wdot.past{border-color:var(--confirmed);background:var(--confirmed)44;}
-.wlabel{font-size:7px;letter-spacing:.5px;color:var(--muted);text-align:center;}
-.wlabel.active{color:var(--spark);}
-.stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
-.stat-box{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:8px;}
-.stat-label{font-size:7px;letter-spacing:2px;color:var(--muted);margin-bottom:2px;}
-.stat-val{font-size:11px;font-weight:700;color:var(--bright);font-family:'Syne',sans-serif;}
-.sig-item{padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;}
-.sig-src{font-size:8px;letter-spacing:1px;color:var(--focus);width:70px;flex-shrink:0;}
-.sig-text{font-size:10px;color:var(--text);line-height:1.5;flex:1;}
-.sig-meta{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
-.attn-panel{background:var(--panel);border:1px solid var(--border2);border-radius:4px;padding:12px;}
-.attn-btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;}
-.attn-btn{padding:8px 4px;border-radius:3px;border:1px solid var(--border2);font-size:8px;letter-spacing:1.5px;cursor:pointer;background:transparent;font-family:'Space Mono',monospace;color:var(--dim);transition:all .15s;text-align:center;}
-.attn-btn.w-active,.attn-btn.w-hover:hover{background:var(--watch)18;border-color:var(--watch);color:var(--watch);}
-.attn-btn.f-active,.attn-btn.f-hover:hover{background:var(--focus)18;border-color:var(--focus);color:var(--focus);}
-.attn-btn.a-active,.attn-btn.a-hover:hover{background:var(--actioned)18;border-color:var(--actioned);color:var(--actioned);}
-.pos-form{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
-.flabel{font-size:8px;letter-spacing:1.5px;color:var(--dim);margin-bottom:3px;}
-.finput{background:var(--surface);border:1px solid var(--border2);border-radius:3px;padding:6px 8px;color:var(--bright);font-family:'Space Mono',monospace;font-size:11px;width:100%;transition:border-color .15s;}
-.finput:focus{outline:none;border-color:var(--actioned);}
-.fselect{background:var(--surface);border:1px solid var(--border2);border-radius:3px;padding:6px 8px;color:var(--bright);font-family:'Space Mono',monospace;font-size:11px;width:100%;}
-.confirm-btn{background:var(--actioned)20;border:1px solid var(--actioned);color:var(--actioned);padding:8px;border-radius:3px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;width:100%;}
-.pf-card{background:var(--panel);border:1px solid var(--border2);border-radius:4px;padding:14px;margin:0 14px 10px;position:relative;overflow:hidden;}
-.pf-card::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;}
-.pf-long::after{background:var(--bull);}
-.pf-short::after{background:var(--bear);}
-.pos-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px;}
-.ps-box{background:var(--surface);border-radius:3px;padding:5px 7px;}
-.ps-label{font-size:7px;letter-spacing:1.5px;color:var(--muted);margin-bottom:1px;}
-.ps-val{font-size:11px;font-weight:700;color:var(--bright);}
-.chip{display:inline-flex;align-items:center;padding:2px 6px;border-radius:2px;font-size:8px;letter-spacing:1px;border:1px solid;}
-.chip-bull{color:var(--bull);border-color:var(--bull)33;background:var(--bull)0d;}
-.chip-bear{color:var(--bear);border-color:var(--bear)33;background:var(--bear)0d;}
-.chip-dim{color:var(--dim);border-color:var(--border2);}
-.chat-fab{position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:var(--spark);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 20px var(--spark)44;z-index:200;transition:transform .2s;font-family:'Syne',sans-serif;color:#000;font-weight:800;}
-.chat-fab:hover{transform:scale(1.1);}
-.chat-panel{position:fixed;bottom:74px;right:20px;width:380px;height:520px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;z-index:200;display:flex;flex-direction:column;box-shadow:0 20px 60px #00000088;}
-.chat-hdr{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
-.chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
-.msg{max-width:90%;font-size:10px;line-height:1.6;padding:8px 10px;border-radius:4px;}
-.msg-user{background:var(--border);color:var(--bright);align-self:flex-end;border-radius:4px 4px 0 4px;}
-.msg-ai{background:var(--panel);color:var(--text);border:1px solid var(--border2);border-radius:4px 4px 4px 0;align-self:flex-start;}
-.chat-row{padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px;flex-shrink:0;}
-.chat-inp{flex:1;background:var(--panel);border:1px solid var(--border2);border-radius:3px;padding:7px 10px;color:var(--bright);font-family:'Space Mono',monospace;font-size:10px;}
-.chat-inp:focus{outline:none;border-color:var(--spark);}
-.chat-send{background:var(--spark)22;border:1px solid var(--spark);color:var(--spark);padding:6px 12px;border-radius:3px;cursor:pointer;font-size:9px;font-family:'Space Mono',monospace;}
-.modal-bg{position:fixed;inset:0;background:#00000099;z-index:300;display:flex;align-items:center;justify-content:center;}
-.modal-box{background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:24px;width:420px;}
-.new-cat-btn{margin:10px 14px;background:transparent;border:1px dashed var(--border2);border-radius:3px;padding:8px;color:var(--dim);font-size:9px;letter-spacing:2px;cursor:pointer;font-family:'Space Mono',monospace;transition:all .15s;width:calc(100% - 28px);}
-.new-cat-btn:hover{border-color:var(--spark);color:var(--spark);}
-.auth-shell{height:100vh;display:flex;align-items:center;justify-content:center;background:var(--void);}
-.auth-box{width:360px;background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:32px;}
-.auth-field{margin-bottom:14px;}
-.auth-label{font-size:8px;letter-spacing:2px;color:var(--dim);margin-bottom:5px;}
-.auth-input{width:100%;background:var(--panel);border:1px solid var(--border2);border-radius:3px;padding:9px 12px;color:var(--bright);font-family:'Space Mono',monospace;font-size:12px;}
-.auth-input:focus{outline:none;border-color:var(--spark);}
-.auth-btn{width:100%;background:var(--spark)22;border:1px solid var(--spark);color:var(--spark);padding:10px;border-radius:3px;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;cursor:pointer;}
-.auth-err{font-size:9px;color:var(--bear);margin-bottom:10px;padding:6px 8px;background:var(--bear)10;border:1px solid var(--bear)33;border-radius:3px;}
-.loading-bar{height:2px;background:linear-gradient(90deg,transparent,var(--spark),transparent);background-size:200%;animation:load-sweep 1.2s infinite;}
-.fade-in{animation:fade-in .2s ease;}
-@keyframes pulse-glow{0%,100%{box-shadow:0 0 0 0 #10b98166}50%{box-shadow:0 0 0 4px #10b98100}}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes fade-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-@keyframes load-sweep{0%{background-position:200%}100%{background-position:-200%}}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; height: 100vh; overflow: hidden; }
+#root { height: 100vh; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ── Layout ── */
+.shell { display: flex; flex-direction: column; height: 100vh; }
+.topbar { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 16px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.logo { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; display: flex; align-items: center; gap: 8px; }
+.logo-mark { width: 20px; height: 20px; border-radius: 5px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: 800; }
+.nav { display: flex; gap: 1px; margin-left: 20px; }
+.nav-btn { padding: 5px 12px; border-radius: var(--r); font-size: 12px; color: var(--text2); cursor: pointer; border: none; background: none; font-family: var(--font); transition: all 0.12s; }
+.nav-btn:hover { color: var(--text); }
+.nav-btn.active { color: var(--text); background: var(--bg4); }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.pill { padding: 3px 9px; border-radius: 20px; font-size: 11px; font-family: var(--mono); border: 1px solid var(--border); color: var(--text2); display: flex; align-items: center; gap: 5px; cursor: pointer; transition: border-color 0.15s; }
+.pill:hover { border-color: var(--border2); }
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ── Buttons ── */
+.btn { padding: 6px 13px; border-radius: var(--r); font-size: 12px; cursor: pointer; border: none; font-family: var(--font); transition: all 0.12s; }
+.btn-primary { background: var(--accent); color: #fff; font-weight: 500; }
+.btn-primary:hover { background: #5590ff; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover { color: var(--text); border-color: var(--border2); }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+.btn-danger { background: transparent; color: var(--red); border: 1px solid transparent; }
+.btn-danger:hover { border-color: var(--red); }
+
+/* ── Main ── */
+.main { display: flex; flex: 1; overflow: hidden; }
+.sidebar { width: 288px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+.sidebar-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.sidebar-scroll { flex: 1; overflow-y: auto; }
+.content { flex: 1; overflow-y: auto; padding: 24px; }
+
+/* ── Badges ── */
+.wave-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; font-family: var(--mono); }
+.wave-spark       { background: rgba(74,157,224,0.12); color: var(--spark);       border: 1px solid rgba(74,157,224,0.25); }
+.wave-confirmed   { background: rgba(34,212,138,0.12); color: var(--confirmed);   border: 1px solid rgba(34,212,138,0.25); }
+.wave-escalation  { background: rgba(240,160,48,0.12); color: var(--escalation);  border: 1px solid rgba(240,160,48,0.25); }
+.wave-structural  { background: rgba(176,106,255,0.12); color: var(--structural); border: 1px solid rgba(176,106,255,0.25); }
+.wave-regime      { background: rgba(224,85,85,0.12);  color: var(--regime);      border: 1px solid rgba(224,85,85,0.25); }
+
+.dir-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
+.dir-bullish { color: var(--green); background: var(--green-lo); }
+.dir-bearish { color: var(--red);   background: var(--red-lo); }
+.dir-neutral { color: var(--text2); background: var(--bg4); }
+
+.att-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
+.att-watch    { color: var(--text2); background: var(--bg4); }
+.att-focus    { color: var(--amber); background: var(--amber-lo); }
+.att-actioned { color: var(--green); background: var(--green-lo); }
+
+/* ── Catalyst list ── */
+.cat-item { padding: 11px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; position: relative; }
+.cat-item:hover { background: var(--bg3); }
+.cat-item.sel { background: var(--bg3); }
+.cat-item.sel::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.cat-name { font-size: 12px; color: var(--text); line-height: 1.4; margin-bottom: 7px; font-weight: 450; }
+.cat-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.conf-track { height: 2px; background: var(--border); border-radius: 1px; margin-top: 7px; }
+.conf-fill { height: 2px; border-radius: 1px; transition: width 0.3s; }
+
+/* ── Detail panel ── */
+.detail-title { font-size: 17px; font-weight: 600; color: var(--text); line-height: 1.4; margin-bottom: 14px; }
+.detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+.kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; }
+.kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text3); margin-bottom: 6px; }
+.kpi-value { font-size: 22px; font-weight: 700; font-family: var(--mono); }
+.kpi-sub { font-size: 10px; color: var(--text2); margin-top: 4px; }
+
+.section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin-bottom: 8px; font-weight: 600; }
+.section-block { margin-bottom: 20px; }
+
+.sig-row { padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); margin-bottom: 6px; border-left: 2px solid var(--border2); }
+.sig-row:last-child { margin-bottom: 0; }
+.sig-source { font-size: 10px; color: var(--accent); font-family: var(--mono); text-transform: uppercase; margin-bottom: 4px; }
+.sig-text { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+.att-btn-row { display: flex; gap: 6px; }
+.att-btn { padding: 6px 14px; border-radius: var(--r); font-size: 11px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text2); font-family: var(--font); transition: all 0.15s; }
+.att-btn:hover { border-color: var(--border2); color: var(--text); }
+.att-btn.active-watch    { border-color: var(--text2);  color: var(--text); }
+.att-btn.active-focus    { border-color: var(--amber);  color: var(--amber);  background: var(--amber-lo); }
+.att-btn.active-actioned { border-color: var(--green);  color: var(--green);  background: var(--green-lo); }
+
+.conf-meter { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.conf-fill-lg { height: 6px; border-radius: 3px; transition: width 0.4s; }
+.tag { display: inline-flex; padding: 2px 7px; background: var(--bg4); border: 1px solid var(--border); border-radius: 3px; font-size: 10px; color: var(--text3); margin: 2px; font-family: var(--mono); }
+
+/* ── Sebastian ── */
+.seb-shell { display: flex; flex-direction: column; height: calc(100vh - 44px); background: var(--bg2); }
+.seb-header { padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.seb-engine-label { font-size: 10px; font-family: var(--mono); color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
+.seb-title { font-size: 15px; font-weight: 600; }
+.seb-sub { font-size: 11px; color: var(--text2); margin-top: 3px; }
+.seb-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.seb-block { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; }
+.seb-block-label { font-size: 10px; font-family: var(--mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+.seb-block-text { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-wrap; }
+.seb-user-block { background: var(--bg4); border: 1px solid var(--border2); border-radius: var(--r); padding: 10px 14px; }
+.seb-user-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; margin-bottom: 4px; }
+.seb-user-text { font-size: 13px; color: var(--text); }
+.seb-input-area { padding: 14px 20px; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; gap: 8px; align-items: flex-end; }
+.seb-textarea { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; color: var(--text); font-family: var(--font); font-size: 13px; outline: none; resize: none; min-height: 40px; max-height: 120px; }
+.seb-textarea:focus { border-color: var(--accent); }
+.seb-shortcuts { display: flex; gap: 6px; padding: 0 20px 10px; flex-wrap: wrap; flex-shrink: 0; }
+.shortcut-btn { padding: 4px 10px; background: var(--bg4); border: 1px solid var(--border); border-radius: 20px; font-size: 11px; color: var(--text2); cursor: pointer; font-family: var(--font); transition: all 0.12s; }
+.shortcut-btn:hover { border-color: var(--border2); color: var(--text); }
+.loading-pulse { opacity: 0.5; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.9; } }
+
+/* ── Assets ── */
+.assets-filter { display: flex; gap: 6px; margin-bottom: 16px; }
+.assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.asset-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
+.asset-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.asset-card.focus-on { border-color: var(--amber); }
+.asset-card.watch-on { border-color: var(--border2); }
+.asset-card.actioned-on { border-color: var(--green); }
+.asset-ticker { font-size: 15px; font-weight: 700; margin-bottom: 2px; font-family: var(--mono); }
+.asset-sector { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.asset-conf-num { font-size: 24px; font-weight: 700; font-family: var(--mono); }
+.no-signal { font-size: 11px; color: var(--text3); margin-top: 8px; }
+
+/* ── Missions ── */
+.mission-type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.mtype-btn { padding: 12px 8px; border: 1px solid var(--border); border-radius: var(--r); background: transparent; color: var(--text2); cursor: pointer; font-family: var(--font); font-size: 12px; text-align: center; transition: all 0.12s; }
+.mtype-btn:hover { border-color: var(--border2); }
+.mtype-btn.sel { border-color: var(--accent); color: var(--text); background: var(--accent-lo); }
+.mtype-icon { font-size: 18px; margin-bottom: 5px; }
+.mission-item { display: flex; align-items: flex-start; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.mission-item:last-child { border-bottom: none; }
+.mission-target { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.mission-desc { font-size: 11px; color: var(--text2); }
+.prio-badge { padding: 2px 7px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
+.prio-normal   { color: var(--accent); background: var(--accent-lo); }
+.prio-high     { color: var(--amber);  background: var(--amber-lo); }
+.prio-critical { color: var(--red);    background: var(--red-lo); }
+
+/* ── Auth ── */
+.auth-wrap { display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--bg); }
+.auth-box { width: 380px; }
+.auth-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+.auth-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 28px; }
+.auth-heading { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.auth-sub { font-size: 12px; color: var(--text2); margin-bottom: 24px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
+.field input { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 12px; color: var(--text); font-family: var(--font); font-size: 13px; outline: none; transition: border-color 0.15s; }
+.field input:focus { border-color: var(--accent); }
+.auth-link { font-size: 12px; color: var(--text2); text-align: center; margin-top: 16px; }
+.auth-link span { color: var(--accent); cursor: pointer; }
+.err-box { background: var(--red-lo); border: 1px solid rgba(224,85,85,0.25); border-radius: var(--r); padding: 8px 12px; font-size: 11px; color: var(--red); margin-bottom: 14px; }
+
+/* ── Cards ── */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); }
+.card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); }
+.card-body { padding: 16px; }
+
+/* ── Chain modal ── */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(2px); }
+.modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r); padding: 24px; width: 440px; max-width: 95vw; }
+.modal-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+.chain-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 11px; border-radius: var(--r); margin-bottom: 3px; background: var(--bg3); font-size: 12px; }
+.chain-ok   { color: var(--green); font-size: 11px; font-family: var(--mono); }
+.chain-warn { color: var(--amber); font-size: 11px; font-family: var(--mono); }
+.chain-err  { color: var(--red);   font-size: 11px; font-family: var(--mono); }
+
+/* ── Empty states ── */
+.empty { text-align: center; padding: 48px 20px; color: var(--text3); }
+.empty h3 { font-size: 14px; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+.empty p  { font-size: 12px; line-height: 1.6; }
+
+/* ── Tooltips ── */
+[data-tip] { position: relative; }
+[data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--bg4); border: 1px solid var(--border2); border-radius: var(--r); padding: 5px 9px; font-size: 11px; color: var(--text); z-index: 50; pointer-events: none; margin-bottom: 6px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script type="text/babel">
-const{useState,useEffect,useCallback,useRef,useMemo}=React;
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
-const api=async(path,opts={})=>{
-  const token=localStorage.getItem("mb_token");
-  const h={"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})};
-  const r=await fetch(path,{headers:h,...opts});
-  const j=await r.json();
-  if(!r.ok)throw new Error(j.detail||"Error");
-  return j;
-};
+/* ── API ── */
+const BASE = '';
+let _token = localStorage.getItem('mb_token') || '';
 
-const fmtAge=ts=>{const d=Math.floor((Date.now()-ts*1000)/60000);return d<1?"just now":d<60?`${d}m`:d<1440?`${Math.floor(d/60)}h`:`${Math.floor(d/1440)}d`;};
-const fmtExp=ts=>{const d=ts*1000-Date.now();if(d<=0)return"EXPIRED";const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>24?`${Math.floor(h/24)}d`:`${h}h ${m}m`;};
-const cc=v=>v>=75?"#10b981":v>=50?"#3b82f6":v>=30?"#f59e0b":"#f43f5e";
-const WAVES=["spark","confirmed","escalation","structural","regime"];
-const WL={"spark":"SPARK","confirmed":"CONFIRMED","escalation":"ESCALATION","structural":"STRUCTURAL","regime":"REGIME"};
-
-function ConfCircle({value,size=56}){
-  const R=22,C=2*Math.PI*R,fill=(value/100)*C,color=cc(value);
-  return(
-    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
-      <svg width={size} height={size} viewBox="0 0 52 52" style={{transform:"rotate(-90deg)"}}>
-        <circle cx="26" cy="26" r={R} fill="none" stroke="var(--border2)" strokeWidth="3"/>
-        <circle cx="26" cy="26" r={R} fill="none" stroke={color} strokeWidth="3"
-          strokeDasharray={`${fill} ${C}`} strokeLinecap="round"/>
-      </svg>
-      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Syne',sans-serif",fontSize:size>45?15:11,fontWeight:800,color}}>{Math.round(value)}</div>
-    </div>
-  );
+async function api(path, opts = {}) {
+  const res = await fetch(BASE + path, {
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.detail || `${res.status} ${res.statusText}`);
+  }
+  return res.json();
 }
 
-function WaveLine({current}){
-  const idx=WAVES.indexOf(current);
-  return(
-    <div className="wave-timeline">
-      {WAVES.map((w,i)=>(
-        <div key={w} className="wave-node">
-          <div className={`wdot ${i===idx?"active":i<idx?"past":""}`}/>
-          <div className={`wlabel ${i===idx?"active":""}`}>{WL[w].slice(0,3)}</div>
-        </div>
-      ))}
-    </div>
-  );
+/* ── Helpers ── */
+function confColor(c) {
+  if (c >= 75) return 'var(--green)';
+  if (c >= 50) return 'var(--amber)';
+  if (c >= 25) return 'var(--accent)';
+  return 'var(--red)';
 }
 
-function AuthPage({onAuth}){
-  const[mode,setMode]=useState("login");
-  const[f,setF]=useState({name:"",email:"",password:""});
-  const[err,setErr]=useState("");
-  const[busy,setBusy]=useState(false);
-  const set=k=>e=>setF(p=>({...p,[k]:e.target.value}));
-  const submit=async()=>{
-    setErr("");setBusy(true);
-    try{
-      const isSu=mode==="signup";
-      const body=isSu?f:{email:f.email,password:f.password};
-      const j=await api(isSu?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify(body)});
-      localStorage.setItem("mb_token",j.token);onAuth(j.user);
-    }catch(e){setErr(e.message);}
+function timeAgo(ts) {
+  const d = Date.now() / 1000 - ts;
+  if (d < 60)    return `${Math.round(d)}s ago`;
+  if (d < 3600)  return `${Math.round(d/60)}m ago`;
+  if (d < 86400) return `${Math.round(d/3600)}h ago`;
+  return `${Math.round(d/86400)}d ago`;
+}
+
+function WaveBadge({ wave }) {
+  return <span className={`wave-badge wave-${wave||'spark'}`}>{wave||'spark'}</span>;
+}
+function DirBadge({ dir }) {
+  const arrow = dir==='bullish' ? '↑' : dir==='bearish' ? '↓' : '→';
+  return <span className={`dir-badge dir-${dir||'neutral'}`}>{arrow} {dir||'neutral'}</span>;
+}
+function AttBadge({ att }) {
+  const label = att==='actioned' ? '✓ Actioned' : att==='focus' ? '◉ Focus' : '◎ Watch';
+  return <span className={`att-badge att-${att||'watch'}`}>{label}</span>;
+}
+
+/* ═══════════════════════════════════════════════
+   AUTH
+═══════════════════════════════════════════════ */
+function AuthScreen({ onAuth }) {
+  const [mode, setMode]     = useState('login');
+  const [name, setName]     = useState('');
+  const [email, setEmail]   = useState('');
+  const [pw, setPw]         = useState('');
+  const [err, setErr]       = useState('');
+  const [busy, setBusy]     = useState(false);
+
+  async function submit() {
+    setErr(''); setBusy(true);
+    try {
+      const body = mode==='login' ? { email, password: pw } : { name, email, password: pw };
+      const data = await api(mode==='login' ? '/api/auth/login' : '/api/auth/register', { method:'POST', body });
+      _token = data.token;
+      localStorage.setItem('mb_token', _token);
+      onAuth(data.user);
+    } catch(e) { setErr(e.message); }
     setBusy(false);
-  };
-  return(
-    <div className="auth-shell">
-      <div className="auth-box fade-in">
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,color:"var(--bright)",letterSpacing:2,marginBottom:4}}>MARKET<span style={{color:"var(--spark)"}}>BRAIN</span></div>
-        <div style={{fontSize:9,color:"var(--muted)",letterSpacing:2,marginBottom:24}}>INTELLIGENCE TERMINAL · v2</div>
-        {mode==="signup"&&<div className="auth-field"><div className="auth-label">NAME</div><input className="auth-input" value={f.name} onChange={set("name")} placeholder="Your name"/></div>}
-        <div className="auth-field"><div className="auth-label">EMAIL</div><input className="auth-input" value={f.email} onChange={set("email")} type="email" placeholder="you@example.com"/></div>
-        <div className="auth-field"><div className="auth-label">PASSWORD</div><input className="auth-input" value={f.password} onChange={set("password")} type="password" placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        {err&&<div className="auth-err">{err}</div>}
-        <button className="auth-btn" onClick={submit} disabled={busy}>{busy?"...":(mode==="login"?"ENTER SYSTEM":"CREATE ACCOUNT")}</button>
-        <div style={{fontSize:9,color:"var(--dim)",textAlign:"center",marginTop:14}}>
-          {mode==="login"?"No account? ":"Have an account? "}
-          <span style={{color:"var(--spark)",cursor:"pointer"}} onClick={()=>{setMode(mode==="login"?"signup":"login");setErr("");}}>{mode==="login"?"Sign up":"Log in"}</span>
+  }
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-box">
+        <div className="auth-logo">
+          <div className="logo-mark">M</div>
+          <span style={{ fontSize:15, fontWeight:700 }}>Market Brain</span>
+        </div>
+        <div className="auth-card">
+          <div className="auth-heading">{mode==='login' ? 'Sign in' : 'Create account'}</div>
+          <div className="auth-sub">Intelligence terminal · Phase 1</div>
+          {err && <div className="err-box">{err}</div>}
+          {mode==='register' && (
+            <div className="field"><label>Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" /></div>
+          )}
+          <div className="field"><label>Email</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@domain.com" /></div>
+          <div className="field">
+            <label>Password</label>
+            <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="••••••••" />
+          </div>
+          <button className="btn btn-primary" style={{width:'100%',marginTop:6}} onClick={submit} disabled={busy}>
+            {busy ? 'Loading...' : mode==='login' ? 'Sign in' : 'Create account'}
+          </button>
+          <div className="auth-link">
+            {mode==='login' ? <>No account? <span onClick={()=>setMode('register')}>Register</span></> : <>Have an account? <span onClick={()=>setMode('login')}>Sign in</span></>}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function CatCard({cat,sel,onClick}){
-  const dc=cat.direction==="bullish"?"dir-bull":cat.direction==="bearish"?"dir-bear":"dir-neutral";
-  const dl=cat.direction==="bullish"?"▲ BULL":cat.direction==="bearish"?"▼ BEAR":"◆ NEU";
-  const color=cc(cat.confidence);
-  return(
-    <div className={`cat-card ${cat.wave} ${sel?"sel":""}`} onClick={onClick}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:6}}>
-        <div className="cat-title">{cat.title}</div>
-        <div className={`wave-badge wave-${cat.wave}`}>{WL[cat.wave]}</div>
-      </div>
-      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
-        <span className={`dir-tag ${dc}`}>{dl}</span>
-        <span style={{fontSize:8,color:"var(--dim)",letterSpacing:1}}>{cat.type?.toUpperCase()}</span>
-        {cat.renewal_count>0&&<span style={{fontSize:8,color:"var(--escalation)"}}>×{cat.renewal_count+1}</span>}
-        <div className="attn-dot" style={{background:cat.attention==="actioned"?"var(--actioned)":cat.attention==="focus"?"var(--focus)":"var(--watch)",marginLeft:"auto"}}/>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <div className="conf-bar"><div className="conf-fill" style={{width:`${cat.confidence}%`,background:color}}/></div>
-        <div style={{fontSize:9,fontWeight:700,color,width:28,textAlign:"right"}}>{Math.round(cat.confidence)}</div>
-      </div>
-      <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:8,color:"var(--muted)"}}>
-        <span>{fmtAge(cat.detected_at)}</span>
-        <span style={{color:cat.expires_at*1000<Date.now()?"var(--bear)":"inherit"}}>exp {fmtExp(cat.expires_at)}</span>
-      </div>
-    </div>
-  );
-}
+/* ═══════════════════════════════════════════════
+   CATALYST SIDEBAR
+═══════════════════════════════════════════════ */
+function CatalystSidebar({ cats, selected, onSelect, loading, onNew }) {
+  const [filter, setFilter] = useState('all');
+  const filtered = useMemo(() => {
+    if (filter==='all')      return cats;
+    if (filter==='focus')    return cats.filter(c=>c.attention==='focus');
+    if (filter==='actioned') return cats.filter(c=>c.attention==='actioned');
+    if (filter==='high')     return cats.filter(c=>c.confidence>=65);
+    return cats;
+  }, [cats, filter]);
 
-function AttnPanel({cat,onUpdate}){
-  const[state,setState]=useState(cat.attention||"watch");
-  const[showForm,setShowForm]=useState(cat.attention==="actioned");
-  const[form,setForm]=useState({asset:cat.assets?.[0]||"",direction:cat.direction==="bearish"?"short":"long",entry_price:"",goal_style:"swing",goal_timeline:"",notes:""});
-  const set=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
-  const pick=async s=>{
-    setState(s);
-    if(s==="actioned"){setShowForm(true);return;}
-    setShowForm(false);
-    await api("/api/cos/attention",{method:"POST",body:JSON.stringify({catalyst_id:cat.id,state:s})});
-    onUpdate();
-  };
-  const confirm=async()=>{
-    await api("/api/cos/attention",{method:"POST",body:JSON.stringify({catalyst_id:cat.id,state:"actioned",...form,entry_price:parseFloat(form.entry_price)||null})});
-    onUpdate();
-  };
-  return(
-    <div className="attn-panel">
-      <div style={{fontSize:8,letterSpacing:2,color:"var(--dim)",marginBottom:8}}>ATTENTION STATE</div>
-      <div className="attn-btns">
-        <button className={`attn-btn w-hover ${state==="watch"?"w-active":""}`} onClick={()=>pick("watch")}>WATCH</button>
-        <button className={`attn-btn f-hover ${state==="focus"?"f-active":""}`} onClick={()=>pick("focus")}>FOCUS</button>
-        <button className={`attn-btn a-hover ${state==="actioned"?"a-active":""}`} onClick={()=>pick("actioned")}>ACTIONED</button>
-      </div>
-      {showForm&&(
-        <div className="pos-form">
-          <div style={{fontSize:8,letterSpacing:2,color:"var(--actioned)",marginBottom:4}}>POSITION DETAILS</div>
-          <div className="form-row">
-            <div><div className="flabel">ASSET</div><input className="finput" value={form.asset} onChange={set("asset")} placeholder="AAPL"/></div>
-            <div><div className="flabel">DIRECTION</div><select className="fselect" value={form.direction} onChange={set("direction")}><option value="long">LONG</option><option value="short">SHORT</option></select></div>
-          </div>
-          <div className="form-row">
-            <div><div className="flabel">ENTRY PRICE</div><input className="finput" value={form.entry_price} onChange={set("entry_price")} placeholder="0.00"/></div>
-            <div><div className="flabel">GOAL STYLE</div><select className="fselect" value={form.goal_style} onChange={set("goal_style")}><option value="in_out">IN / OUT</option><option value="swing">SWING</option><option value="long_term">LONG TERM</option></select></div>
-          </div>
-          <div><div className="flabel">TIMELINE</div><input className="finput" value={form.goal_timeline} onChange={set("goal_timeline")} placeholder="e.g. 2–5 days"/></div>
-          <div><div className="flabel">THESIS NOTES</div><input className="finput" value={form.notes} onChange={set("notes")} placeholder="Why this position..."/></div>
-          <button className="confirm-btn" onClick={confirm}>CONFIRM POSITION →</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CatDetail({cat,onUpdate,onDismiss}){
-  if(!cat)return(
-    <div className="empty-state">
-      <div style={{fontSize:40,opacity:.2}}>◈</div>
-      <div style={{fontSize:9,letterSpacing:2}}>SELECT A CATALYST</div>
-      <div style={{fontSize:8,color:"var(--border2)",textAlign:"center",maxWidth:220,lineHeight:1.8}}>Catalysts cluster related signals, track confidence decay, and escalate through wave states.</div>
-    </div>
-  );
-  const sigs=[...(cat.signals||[])].reverse();
-  const dc=cat.direction==="bullish"?"chip-bull":cat.direction==="bearish"?"chip-bear":"chip-dim";
-  return(
-    <div className="detail-inner fade-in">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
-        <div style={{flex:1}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:"var(--bright)",lineHeight:1.2,marginBottom:10}}>{cat.title}</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-            <div className={`wave-badge wave-${cat.wave}`}>{WL[cat.wave]}</div>
-            <span className={`chip ${dc}`}>{cat.direction==="bullish"?"▲":cat.direction==="bearish"?"▼":"◆"} {cat.direction?.toUpperCase()}</span>
-            <span className="chip chip-dim">{cat.type?.toUpperCase()}</span>
-            {cat.renewal_count>0&&<span className="chip" style={{color:"var(--escalation)",borderColor:"var(--escalation)44",background:"var(--escalation)0d"}}>RENEWED ×{cat.renewal_count}</span>}
-            {cat.verified&&<span className="chip" style={{color:"var(--bull)",borderColor:"var(--bull)44",background:"var(--bull)0d"}}>✓ VERIFIED</span>}
-          </div>
-        </div>
-        <ConfCircle value={cat.confidence}/>
-      </div>
-
-      <div>
-        <div className="sec-title">WAVE PROGRESSION</div>
-        <WaveLine current={cat.wave}/>
-      </div>
-
-      <div className="stat-grid">
-        <div className="stat-box"><div className="stat-label">DETECTED</div><div className="stat-val">{fmtAge(cat.detected_at)}</div></div>
-        <div className="stat-box"><div className="stat-label">EXPIRES</div><div className="stat-val" style={{color:cat.expires_at*1000<Date.now()?"var(--bear)":"inherit"}}>{fmtExp(cat.expires_at)}</div></div>
-        <div className="stat-box"><div className="stat-label">SIGNALS</div><div className="stat-val">{cat.signals?.length||0}</div></div>
-      </div>
-
-      {(cat.assets?.length>0||cat.sectors?.length>0)&&(
+  return (
+    <div className="sidebar">
+      <div className="sidebar-header">
         <div>
-          <div className="sec-title">SCOPE</div>
-          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            {cat.assets?.map(a=><span key={a} className="chip chip-dim">{a}</span>)}
-            {cat.sectors?.map(s=><span key={s} style={{fontSize:8,color:"var(--dim)",padding:"2px 6px",border:"1px dashed var(--border2)",borderRadius:2}}>{s}</span>)}
+          <div style={{fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.07em',color:'var(--text2)'}}>Catalysts</div>
+          <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{cats.length} active</div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={onNew}>+ Mission</button>
+      </div>
+      <div style={{display:'flex',gap:4,padding:'8px 10px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
+        {['all','focus','actioned','high'].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)}
+            style={{padding:'3px 8px',borderRadius:4,fontSize:10,fontFamily:'var(--mono)',border:'none',cursor:'pointer',
+              background: filter===f ? 'var(--bg4)' : 'transparent',
+              color: filter===f ? 'var(--text)' : 'var(--text3)'}}>
+            {f}
+          </button>
+        ))}
+      </div>
+      <div className="sidebar-scroll">
+        {loading && <div style={{padding:20,color:'var(--text3)',fontSize:12}}>Loading signals...</div>}
+        {!loading && filtered.length===0 && (
+          <div className="empty" style={{padding:32}}>
+            <h3>No catalysts</h3>
+            <p>Start a mission to begin tracking signals</p>
           </div>
-        </div>
-      )}
-
-      {cat.tags?.length>0&&(
-        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-          {cat.tags.map(t=><span key={t} style={{fontSize:8,color:"var(--muted)",padding:"1px 5px",background:"var(--panel)",border:"1px solid var(--border)",borderRadius:2}}>#{t}</span>)}
-        </div>
-      )}
-
-      <AttnPanel cat={cat} onUpdate={onUpdate}/>
-
-      {sigs.length>0&&(
-        <div>
-          <div className="sec-title">SIGNAL HISTORY ({sigs.length})</div>
-          {sigs.map((s,i)=>(
-            <div key={i} className="sig-item">
-              <div className="sig-src">{s.source?.toUpperCase()}</div>
-              <div className="sig-text">{s.summary}</div>
-              <div className="sig-meta">
-                <div style={{fontSize:9,fontWeight:700,color:cc(s.strength)}}>{Math.round(s.strength)}</div>
-                <div style={{fontSize:8,color:"var(--muted)"}}>{fmtAge(s.ts)}</div>
-              </div>
+        )}
+        {filtered.map(cat => (
+          <div key={cat.id} className={`cat-item${selected?.id===cat.id?' sel':''}`} onClick={()=>onSelect(cat)}>
+            <div className="cat-name">{cat.title?.slice(0,90)}</div>
+            <div className="cat-row">
+              <WaveBadge wave={cat.wave} />
+              <DirBadge dir={cat.direction} />
+              {cat.attention==='focus'    && <span style={{fontSize:9,color:'var(--amber)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>FOCUS</span>}
+              {cat.attention==='actioned' && <span style={{fontSize:9,color:'var(--green)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>ACTIONED</span>}
             </div>
+            <div className="conf-track">
+              <div className="conf-fill" style={{width:`${Math.max(2,cat.confidence)}%`,background:confColor(cat.confidence)}} />
+            </div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:4,fontFamily:'var(--mono)'}}>
+              {cat.confidence}% · {(cat.assets||[]).slice(0,3).join(' ')||cat.sectors?.slice(0,2).join(' ')||'global'}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   CATALYST DETAIL
+═══════════════════════════════════════════════ */
+function CatalystDetail({ cat, onAttention, onVerify, onDismiss, onAskSebastian, verifying }) {
+  if (!cat) return (
+    <div className="empty" style={{paddingTop:80}}>
+      <h3>Select a catalyst</h3>
+      <p>Choose a catalyst from the sidebar to view full intelligence detail<br/>or start a mission to begin tracking an asset, sector, or theme</p>
+    </div>
+  );
+
+  const sources = [...new Set((cat.signals||[]).map(s=>s.source))];
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{marginBottom:20}}>
+        <div className="detail-title">{cat.title}</div>
+        <div className="detail-badges">
+          <WaveBadge wave={cat.wave} />
+          <DirBadge dir={cat.direction} />
+          <AttBadge att={cat.attention} />
+          {cat.verified && <span style={{fontSize:10,color:'var(--green)',border:'1px solid rgba(34,212,138,0.3)',padding:'2px 7px',borderRadius:3,fontFamily:'var(--mono)'}}>✓ VERIFIED</span>}
+          {cat.mission_id && <span style={{fontSize:10,color:'var(--purple)',border:'1px solid rgba(160,122,255,0.3)',padding:'2px 7px',borderRadius:3,fontFamily:'var(--mono)'}}>◎ MISSION</span>}
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="kpi-grid">
+        <div className="kpi">
+          <div className="kpi-label">Confidence</div>
+          <div className="kpi-value" style={{color:confColor(cat.confidence)}}>{cat.confidence}%</div>
+          <div className="conf-meter" style={{marginTop:8}}>
+            <div className="conf-fill-lg" style={{width:`${Math.max(2,cat.confidence)}%`,background:confColor(cat.confidence)}} />
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Renewals</div>
+          <div className="kpi-value" style={{color:'var(--text)'}}>{cat.renewal_count}</div>
+          <div className="kpi-sub">signal updates</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Sources</div>
+          <div className="kpi-value" style={{color:'var(--purple)'}}>{sources.length}</div>
+          <div className="kpi-sub">{sources.slice(0,2).join(', ')}</div>
+        </div>
+      </div>
+
+      {/* Sebastian summary */}
+      {cat.persona_summary && (
+        <div className="section-block">
+          <div className="section-label">Sebastian Interpretation</div>
+          <div className="sig-row" style={{borderLeftColor:'var(--accent)'}}>
+            <div className="sig-source">Sebastian · Intelligence Engine</div>
+            <div className="sig-text">{cat.persona_summary}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Assets / Sectors */}
+      <div className="section-block">
+        <div className="section-label">Scope</div>
+        <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
+          {(cat.assets||[]).map(a=><span key={a} className="tag">{a}</span>)}
+          {(cat.sectors||[]).map(s=><span key={s} className="tag" style={{color:'var(--text2)'}}>{s}</span>)}
+          {(cat.tags||[]).map(t=><span key={t} className="tag" style={{color:'var(--text3)'}}>{t}</span>)}
+          {!(cat.assets||[]).length && !(cat.sectors||[]).length && <span style={{fontSize:11,color:'var(--text3)'}}>Global / cross-sector</span>}
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="section-block">
+        <div className="section-label">Timeline</div>
+        <div style={{display:'flex',gap:20,fontSize:11,color:'var(--text2)',fontFamily:'var(--mono)'}}>
+          <span>Detected {timeAgo(cat.detected_at)}</span>
+          <span>Updated {timeAgo(cat.updated_at)}</span>
+          <span>Expires {timeAgo(cat.expires_at)}</span>
+          <span>Type: {cat.type}</span>
+        </div>
+      </div>
+
+      {/* Signal chain */}
+      <div className="section-block">
+        <div className="section-label">Signal Chain ({(cat.signals||[]).length} signals)</div>
+        {(cat.signals||[]).slice(-6).reverse().map((s,i)=>(
+          <div key={i} className="sig-row">
+            <div className="sig-source">{s.source} · str {Math.round(s.strength||0)} · {timeAgo(s.ts)}</div>
+            <div className="sig-text">{s.summary}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Attention */}
+      <div className="section-block">
+        <div className="section-label">Attention State</div>
+        <div className="att-btn-row">
+          {[['watch','◎ Watch','active-watch'],['focus','◉ Focus','active-focus'],['actioned','✓ Actioned','active-actioned']].map(([state,label,activeClass])=>(
+            <button key={state} className={`att-btn${cat.attention===state?' '+activeClass:''}`} onClick={()=>onAttention(cat.id,state)}>{label}</button>
           ))}
         </div>
-      )}
-
-      <button onClick={onDismiss} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:3,padding:"7px",color:"var(--muted)",fontSize:8,letterSpacing:2,cursor:"pointer",fontFamily:"'Space Mono',monospace"}}>DISMISS CATALYST</button>
-    </div>
-  );
-}
-
-function ChatPanel({onClose,ctx}){
-  const[msgs,setMsgs]=useState([{role:"ai",text:"Intelligence briefing ready. Ask about any catalyst, position, or market condition."}]);
-  const[inp,setInp]=useState("");
-  const[busy,setBusy]=useState(false);
-  const ref=useRef(null);
-  useEffect(()=>{if(ref.current)ref.current.scrollTop=ref.current.scrollHeight;},[msgs]);
-  const send=async()=>{
-    if(!inp.trim()||busy)return;
-    const msg=inp.trim();setInp("");
-    setMsgs(p=>[...p,{role:"user",text:msg}]);
-    setBusy(true);setMsgs(p=>[...p,{role:"ai",text:"…"}]);
-    try{
-      const history=msgs.slice(-8).map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
-      const prefix=ctx?`[Catalyst context: ${ctx.title} — ${ctx.wave} wave, ${Math.round(ctx.confidence)}% confidence] `:"";
-      const j=await api("/api/ai-chat",{method:"POST",body:JSON.stringify({message:prefix+msg,history})});
-      setMsgs(p=>[...p.slice(0,-1),{role:"ai",text:j.response}]);
-    }catch(e){setMsgs(p=>[...p.slice(0,-1),{role:"ai",text:"Error reaching intelligence layer."}]);}
-    setBusy(false);
-  };
-  return(
-    <div className="chat-panel fade-in">
-      <div className="chat-hdr">
-        <div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontSize:12,fontWeight:700,color:"var(--spark)"}}>MARI</div>
-          <div style={{fontSize:8,color:"var(--muted)",letterSpacing:1}}>MARKET AI · INTELLIGENCE</div>
-        </div>
-        <button style={{background:"none",border:"none",color:"var(--dim)",cursor:"pointer",fontSize:14}} onClick={onClose}>✕</button>
       </div>
-      {ctx&&<div style={{padding:"5px 12px",background:"var(--spark)10",borderBottom:"1px solid var(--spark)22",fontSize:8,color:"var(--spark)",letterSpacing:1}}>◈ {ctx.title.slice(0,45)}{ctx.title.length>45?"...":""}</div>}
-      <div className="chat-msgs" ref={ref}>
-        {msgs.map((m,i)=><div key={i} className={`msg ${m.role==="user"?"msg-user":"msg-ai"}`}>{m.text}</div>)}
-      </div>
-      <div className="chat-row">
-        <input className="chat-inp" value={inp} onChange={e=>setInp(e.target.value)} placeholder="Ask MARI..." onKeyDown={e=>e.key==="Enter"&&send()}/>
-        <button className="chat-send" onClick={send} disabled={busy}>{busy?"...":"→"}</button>
+
+      {/* Actions */}
+      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+        <button className="btn btn-ghost btn-sm" onClick={()=>onAskSebastian(`Interpret catalyst: "${cat.title.slice(0,80)}". Wave: ${cat.wave}. Confidence: ${cat.confidence}%. Direction: ${cat.direction}. Sources: ${sources.join(', ')}.`)}>
+          Ask Sebastian
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={()=>onVerify(cat.id)} disabled={verifying}>
+          {verifying ? 'Verifying...' : '⊕ Verify (Perplexity)'}
+        </button>
+        <button className="btn btn-danger btn-sm" onClick={()=>onDismiss(cat.id)}>Dismiss</button>
       </div>
     </div>
   );
 }
 
-function NewSignalModal({onCreated,onClose}){
-  const[f,setF]=useState({source:"manual",asset:"",sector:"",direction:"bullish",strength:"65",summary:"",catalyst_type:"asset",tags:""});
-  const[busy,setBusy]=useState(false);
-  const set=k=>e=>setF(p=>({...p,[k]:e.target.value}));
-  const submit=async()=>{
-    if(!f.summary.trim())return;
+/* ═══════════════════════════════════════════════
+   SEBASTIAN TAB
+═══════════════════════════════════════════════ */
+function SebastianTab({ pendingQuery, onQueryConsumed }) {
+  const [msgs, setMsgs]   = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [brief, setBrief] = useState(null);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    // Load daily brief on mount
+    api('/api/sebastian/summarise', { method:'POST' }).then(d=>setBrief(d.brief)).catch(()=>{});
+  }, []);
+
+  useEffect(() => {
+    if (pendingQuery) {
+      setInput(pendingQuery);
+      onQueryConsumed?.();
+    }
+  }, [pendingQuery]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }); }, [msgs]);
+
+  async function send(text) {
+    const q = (text||input).trim();
+    if (!q || busy) return;
+    setInput('');
+    setMsgs(prev=>[...prev, { role:'user', text:q }]);
     setBusy(true);
-    try{
-      await api("/api/cos/signal",{method:"POST",body:JSON.stringify({...f,strength:parseFloat(f.strength),tags:f.tags.split(",").map(t=>t.trim()).filter(Boolean)})});
-      onCreated();onClose();
-    }catch(e){}
+    try {
+      const history = msgs.map(m=>({ role:m.role==='user'?'user':'assistant', content:m.text }));
+      const data = await api('/api/sebastian/interpret', { method:'POST', body:{ message:q, history } });
+      setMsgs(prev=>[...prev, { role:'sebastian', text:data.response }]);
+    } catch(e) {
+      setMsgs(prev=>[...prev, { role:'sebastian', text:`Error: ${e.message}` }]);
+    }
     setBusy(false);
-  };
-  return(
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal-box" onClick={e=>e.stopPropagation()}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:14,fontWeight:700,color:"var(--bright)",letterSpacing:2,marginBottom:16}}>NEW SIGNAL</div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <div className="form-row">
-            <div><div className="flabel">SOURCE</div><select className="fselect" value={f.source} onChange={set("source")}>{["manual","macro","news","technical","fundamental","geopolitical","sector"].map(s=><option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
-            <div><div className="flabel">TYPE</div><select className="fselect" value={f.catalyst_type} onChange={set("catalyst_type")}>{["asset","sector","macro","geo"].map(t=><option key={t} value={t}>{t.toUpperCase()}</option>)}</select></div>
+  }
+
+  const shortcuts = [
+    'What are the highest conviction signals right now?',
+    'Summarise wave transitions in the last 24h',
+    'Which catalysts should I focus on?',
+    'Explain the current macro regime',
+    'What signals need immediate attention?',
+  ];
+
+  return (
+    <div className="seb-shell">
+      <div className="seb-header">
+        <div className="seb-engine-label">Interpretation Engine</div>
+        <div className="seb-title">Sebastian</div>
+        <div className="seb-sub">Catalyst interpretation · Wave analysis · Signal reasoning</div>
+      </div>
+
+      <div className="seb-body">
+        {/* Daily brief */}
+        {brief && (
+          <div className="seb-block" style={{borderLeftColor:'var(--accent)',borderLeft:'2px solid var(--accent)'}}>
+            <div className="seb-block-label">Daily Intelligence Brief</div>
+            <div className="seb-block-text">{brief}</div>
           </div>
-          <div className="form-row">
-            <div><div className="flabel">ASSET</div><input className="finput" value={f.asset} onChange={set("asset")} placeholder="NVDA"/></div>
-            <div><div className="flabel">SECTOR</div><input className="finput" value={f.sector} onChange={set("sector")} placeholder="Technology"/></div>
+        )}
+
+        {msgs.length === 0 && !brief && (
+          <div style={{color:'var(--text3)',fontSize:12,padding:'12px 0'}}>Sebastian is ready. Use a shortcut or ask a question.</div>
+        )}
+
+        {msgs.map((m,i)=>(
+          m.role==='user' ? (
+            <div key={i} className="seb-user-block">
+              <div className="seb-user-label">You</div>
+              <div className="seb-user-text">{m.text}</div>
+            </div>
+          ) : (
+            <div key={i} className="seb-block" style={{borderLeft:'2px solid var(--accent)'}}>
+              <div className="seb-block-label">Sebastian</div>
+              <div className="seb-block-text">{m.text}</div>
+            </div>
+          )
+        ))}
+
+        {busy && (
+          <div className="seb-block loading-pulse" style={{borderLeft:'2px solid var(--accent)'}}>
+            <div className="seb-block-label">Sebastian</div>
+            <div className="seb-block-text">Interpreting signals...</div>
           </div>
-          <div className="form-row">
-            <div><div className="flabel">DIRECTION</div><select className="fselect" value={f.direction} onChange={set("direction")}><option value="bullish">BULLISH</option><option value="bearish">BEARISH</option><option value="neutral">NEUTRAL</option></select></div>
-            <div><div className="flabel">STRENGTH (0–100)</div><input className="finput" value={f.strength} onChange={set("strength")} type="number" min="0" max="100"/></div>
-          </div>
-          <div><div className="flabel">SIGNAL SUMMARY</div><input className="finput" value={f.summary} onChange={set("summary")} placeholder="Describe what you're seeing..."/></div>
-          <div><div className="flabel">TAGS (comma-separated)</div><input className="finput" value={f.tags} onChange={set("tags")} placeholder="earnings, guidance, macro"/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:4}}>
-            <button onClick={onClose} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:3,padding:8,color:"var(--dim)",fontSize:9,letterSpacing:2,cursor:"pointer",fontFamily:"'Space Mono',monospace"}}>CANCEL</button>
-            <button onClick={submit} disabled={busy} style={{background:"var(--spark)22",border:"1px solid var(--spark)",borderRadius:3,padding:8,color:"var(--spark)",fontSize:9,letterSpacing:2,cursor:"pointer",fontFamily:"'Space Mono',monospace"}}>{busy?"...":"CREATE →"}</button>
-          </div>
-        </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="seb-shortcuts">
+        {shortcuts.map((s,i)=>(
+          <button key={i} className="shortcut-btn" onClick={()=>send(s)}>{s}</button>
+        ))}
+      </div>
+
+      <div className="seb-input-area">
+        <textarea className="seb-textarea" rows={1} value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } }}
+          placeholder="Ask Sebastian to interpret a catalyst, wave, or signal alignment..." />
+        <button className="btn btn-primary" onClick={()=>send()} disabled={busy}>Send</button>
       </div>
     </div>
   );
 }
 
-function ActionedPanel({catalysts}){
-  const items=catalysts.filter(c=>c.attention==="actioned"&&c.position);
-  if(!items.length)return(
-    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,gap:8,color:"var(--muted)"}}>
-      <div style={{fontSize:32,opacity:.15}}>◈</div>
-      <div style={{fontSize:9,letterSpacing:2,textAlign:"center"}}>NO ACTIONED POSITIONS</div>
-      <div style={{fontSize:8,color:"var(--border2)",textAlign:"center",lineHeight:1.6,maxWidth:200}}>Mark a catalyst as Actioned and log your entry to track it here.</div>
-    </div>
-  );
-  return(
-    <div style={{padding:"10px 0",flex:1}}>
-      {items.map(c=>{
-        const p=c.position,isL=p.direction==="long";
-        return(
-          <div key={c.id} className={`pf-card ${isL?"pf-long":"pf-short"}`}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-              <div>
-                <span style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--bright)"}}>{p.asset}</span>
-                <span className={`dir-tag ${isL?"dir-bull":"dir-bear"}`} style={{marginLeft:8}}>{isL?"▲ LONG":"▼ SHORT"}</span>
-              </div>
-              <ConfCircle value={c.confidence} size={40}/>
-            </div>
-            <div className="pos-stats">
-              {[["ENTRY",p.entry_price?`$${p.entry_price}`:"—"],["STYLE",(p.goal_style||"").replace("_"," ").toUpperCase()],["TIMELINE",p.goal_timeline||"—"],["WAVE",WL[c.wave]]].map(([l,v])=>(
-                <div key={l} className="ps-box"><div className="ps-label">{l}</div><div className="ps-val">{v}</div></div>
-              ))}
-            </div>
-            {p.notes&&<div style={{marginTop:8,fontSize:9,color:"var(--dim)",lineHeight:1.6,borderTop:"1px solid var(--border)",paddingTop:6}}>{p.notes}</div>}
-            <div style={{marginTop:6,fontSize:8,color:"var(--muted)"}}>◈ {c.title.slice(0,52)}{c.title.length>52?"...":""}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+/* ═══════════════════════════════════════════════
+   ASSETS TAB
+═══════════════════════════════════════════════ */
+function AssetsTab({ onAskSebastian }) {
+  const [assets, setAssets]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter]   = useState('all');
+  const [addTicker, setAddTicker] = useState('');
 
-function MainApp({user,onLogout}){
-  const[cats,setCats]=useState([]);
-  const[sel,setSel]=useState(null);
-  const[tab,setTab]=useState("intel");
-  const[filter,setFilter]=useState("all");
-  const[loading,setLoading]=useState(true);
-  const[showChat,setShowChat]=useState(false);
-  const[showNew,setShowNew]=useState(false);
+  useEffect(() => {
+    api('/api/assets').then(d=>{ setAssets(d.assets||[]); setLoading(false); }).catch(()=>setLoading(false));
+  }, []);
 
-  const load=useCallback(async()=>{
-    try{const j=await api("/api/cos/catalysts?status=active");setCats(j.catalysts||[]);}catch(e){}
-    setLoading(false);
-  },[]);
+  async function addWatch(ticker) {
+    await api(`/api/profile/watchlist/${ticker.toUpperCase()}`, { method:'POST' }).catch(()=>{});
+    setAssets(prev=>prev.map(a=>a.ticker===ticker.toUpperCase()?{...a,on_watchlist:true}:a));
+  }
 
-  useEffect(()=>{load();},[]);
-  useEffect(()=>{const t=setInterval(load,30000);return()=>clearInterval(t);},[load]);
+  async function addManual() {
+    if (!addTicker.trim()) return;
+    await addWatch(addTicker.trim().toUpperCase());
+    setAddTicker('');
+    // Refresh
+    const d = await api('/api/assets').catch(()=>({assets:[]}));
+    setAssets(d.assets||[]);
+  }
 
-  const dismiss=async()=>{
-    if(!sel)return;
-    await api(`/api/cos/catalyst/${sel.id}`,{method:"DELETE"});
-    setSel(null);load();
-  };
+  const filtered = useMemo(()=>{
+    if (filter==='catalyst') return assets.filter(a=>a.catalysts?.length>0);
+    if (filter==='focus')    return assets.filter(a=>a.on_focus);
+    if (filter==='watchlist')return assets.filter(a=>a.on_watchlist);
+    if (filter==='actioned') return assets.filter(a=>a.attention==='actioned');
+    return assets;
+  }, [assets, filter]);
 
-  const filtered=useMemo(()=>filter==="all"?cats:cats.filter(c=>c.attention===filter),[cats,filter]);
-  const selLive=useMemo(()=>cats.find(c=>c.id===sel?.id)||sel,[cats,sel]);
-  const actionedCount=cats.filter(c=>c.attention==="actioned").length;
-  const focusCount=cats.filter(c=>c.attention==="focus").length;
-  const wc=w=>cats.filter(c=>c.wave===w).length;
-
-  return(
-    <div className="shell">
-      <div className="topbar">
-        <div className="wordmark">MARKET<span>BRAIN</span></div>
-        <div className="topbar-tabs">
-          {[["intel","INTELLIGENCE"],["actioned","POSITIONS"]].map(([v,l])=>(
-            <button key={v} className={`tab ${tab===v?"active":""}`} onClick={()=>setTab(v)}>{l}</button>
-          ))}
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:600,marginBottom:2}}>Intelligence Index</div>
+          <div style={{fontSize:11,color:'var(--text2)'}}>{assets.length} assets tracked · {assets.filter(a=>a.catalysts?.length>0).length} with active catalysts</div>
         </div>
-        <div className="topbar-right">
-          {loading?<div className="loading-bar" style={{width:50,borderRadius:2}}/>:<div className="pulse-dot"/>}
-          <span className="sys-label">{cats.length} CATALYSTS</span>
-          {focusCount>0&&<span className="sys-label" style={{color:"var(--focus)"}}>◈ {focusCount} FOCUS</span>}
-          {actionedCount>0&&<span className="sys-label" style={{color:"var(--actioned)"}}>✓ {actionedCount} ACTIONED</span>}
-          <button className="icon-btn" onClick={()=>setShowNew(true)}>+ SIGNAL</button>
-          <button className="icon-btn" onClick={async()=>{await api("/api/auth/logout",{method:"POST"});localStorage.removeItem("mb_token");onLogout();}} style={{color:"var(--muted)"}}>EXIT</button>
+        <div style={{display:'flex',gap:6}}>
+          <input value={addTicker} onChange={e=>setAddTicker(e.target.value.toUpperCase())}
+            onKeyDown={e=>e.key==='Enter'&&addManual()}
+            placeholder="Add ticker..." style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:'6px 10px',color:'var(--text)',fontFamily:'var(--mono)',fontSize:12,width:120,outline:'none'}} />
+          <button className="btn btn-ghost btn-sm" onClick={addManual}>+ Watch</button>
         </div>
       </div>
 
-      {tab==="intel"&&(
-        <div className="body">
-          {/* LEFT */}
-          <div className="col-left">
-            <div className="col-header">
-              <div className="col-title">CATALYSTS</div>
-              <span className="badge">{filtered.length}</span>
-            </div>
-            <div className="filter-bar">
-              {[["all","ALL"],["watch","WATCH"],["focus","FOCUS"],["actioned","ACTIONED"]].map(([v,l])=>(
-                <button key={v} className={`filter-btn ${filter===v?"active":""}`} onClick={()=>setFilter(v)}>{l}</button>
-              ))}
-            </div>
-            <div className="wave-summary">
-              {WAVES.map(w=>(
-                <div key={w} className="wave-sum-item">
-                  <div style={{fontSize:11,fontWeight:700,color:wc(w)>0?`var(--${w})`:"var(--border2)",fontFamily:"'Syne',sans-serif"}}>{wc(w)}</div>
-                  <div style={{fontSize:7,color:"var(--muted)"}}>{WL[w].slice(0,3)}</div>
-                </div>
-              ))}
-            </div>
-            {filtered.length===0&&!loading&&(
-              <div style={{padding:24,textAlign:"center",color:"var(--muted)",fontSize:9,letterSpacing:2,lineHeight:2.2}}>
-                NO ACTIVE CATALYSTS<br/><span style={{color:"var(--border2)",fontSize:8}}>Post a signal to begin</span>
-              </div>
-            )}
-            {filtered.map(c=>(
-              <CatCard key={c.id} cat={c} sel={selLive?.id===c.id} onClick={()=>setSel(selLive?.id===c.id?null:c)}/>
-            ))}
-            <button className="new-cat-btn" onClick={()=>setShowNew(true)}>+ NEW SIGNAL</button>
-          </div>
+      <div className="assets-filter">
+        {['all','catalyst','watchlist','focus','actioned'].map(f=>(
+          <button key={f} className={`btn btn-ghost btn-sm${filter===f?' active':''}`}
+            style={{borderColor:filter===f?'var(--accent)':'',color:filter===f?'var(--accent)':''}}
+            onClick={()=>setFilter(f)}>{f}</button>
+        ))}
+      </div>
 
-          {/* MID */}
-          <div className="col-mid">
-            <CatDetail cat={selLive} onUpdate={load} onDismiss={dismiss}/>
-          </div>
+      {loading && <div className="empty"><h3>Loading asset intelligence...</h3></div>}
+      {!loading && filtered.length===0 && (
+        <div className="empty">
+          <h3>No assets match this filter</h3>
+          <p>Add tickers to your watchlist or start a mission to track assets</p>
+        </div>
+      )}
 
-          {/* RIGHT */}
-          <div className="col-right">
-            <div className="col-header">
-              <div className="col-title">ACTIONED</div>
-              <span className="badge">{actionedCount}</span>
+      <div className="assets-grid">
+        {filtered.map(a=>(
+          <div key={a.ticker} className={`asset-card${a.on_focus?' focus-on':a.attention==='actioned'?' actioned-on':a.on_watchlist?' watch-on':''}`}>
+            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:2}}>
+              <div className="asset-ticker">{a.ticker}</div>
+              {a.on_watchlist && !a.on_focus && <span style={{fontSize:9,color:'var(--text3)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>WATCHING</span>}
+              {a.on_focus     && <span style={{fontSize:9,color:'var(--amber)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>FOCUS</span>}
             </div>
-            <ActionedPanel catalysts={cats}/>
-            {focusCount>0&&(
+            <div className="asset-sector">{a.sector||'—'}</div>
+            {a.top_conf>0 ? (
               <>
-                <div style={{padding:"10px 14px 6px",borderTop:"1px solid var(--border)",flexShrink:0}}>
-                  <div style={{fontSize:9,letterSpacing:2,color:"var(--focus)"}}>◈ IN FOCUS ({focusCount})</div>
+                <div className="asset-conf-num" style={{color:confColor(a.top_conf)}}>{a.top_conf.toFixed(0)}%</div>
+                <div style={{display:'flex',gap:5,marginTop:6,flexWrap:'wrap'}}>
+                  <WaveBadge wave={a.top_wave} />
+                  <DirBadge dir={a.direction} />
                 </div>
-                {cats.filter(c=>c.attention==="focus").map(c=>(
-                  <div key={c.id} style={{padding:"10px 14px",borderBottom:"1px solid var(--border)"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                      <div style={{fontFamily:"'Syne',sans-serif",fontSize:12,fontWeight:700,color:"var(--bright)"}}>{c.assets?.[0]||c.sectors?.[0]||"—"}</div>
-                      <ConfCircle value={c.confidence} size={32}/>
-                    </div>
-                    <div style={{fontSize:9,color:"var(--text)",lineHeight:1.5}}>{c.title}</div>
-                    <div style={{display:"flex",gap:4,marginTop:6,alignItems:"center"}}>
-                      <div className={`wave-badge wave-${c.wave}`}>{WL[c.wave]}</div>
-                      <span style={{fontSize:8,color:"var(--muted)"}}>exp {fmtExp(c.expires_at)}</span>
-                    </div>
-                  </div>
-                ))}
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:6,fontFamily:'var(--mono)'}}>
+                  {a.catalysts?.length||0} catalyst{a.catalysts?.length!==1?'s':''}
+                </div>
               </>
+            ) : (
+              <div className="no-signal">No active signals</div>
             )}
+            <div style={{display:'flex',gap:5,marginTop:10,flexWrap:'wrap'}}>
+              {!a.on_watchlist && <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={()=>addWatch(a.ticker)}>+ Watch</button>}
+              {a.top_conf>0 && <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={()=>onAskSebastian(`What does the ${a.top_wave} wave signal mean for ${a.ticker}? Confidence is ${a.top_conf.toFixed(0)}%, direction ${a.direction}.`)}>Ask Sebastian</button>}
+            </div>
           </div>
-        </div>
-      )}
-
-      {tab==="actioned"&&(
-        <div style={{overflow:"auto",padding:16}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontSize:13,fontWeight:700,color:"var(--bright)",letterSpacing:3,marginBottom:14}}>ACTIONED POSITIONS</div>
-          <ActionedPanel catalysts={cats}/>
-        </div>
-      )}
-
-      <button className="chat-fab" onClick={()=>setShowChat(p=>!p)} title="Ask MARI">◈</button>
-      {showChat&&<ChatPanel onClose={()=>setShowChat(false)} ctx={selLive}/>}
-      {showNew&&<NewSignalModal onCreated={load} onClose={()=>setShowNew(false)}/>}
+        ))}
+      </div>
     </div>
   );
 }
 
-function Root(){
-  const[user,setUser]=useState(null);
-  const[checking,setChecking]=useState(true);
+/* ═══════════════════════════════════════════════
+   MISSIONS TAB
+═══════════════════════════════════════════════ */
+function MissionsTab({ onCreated }) {
+  const [missions, setMissions] = useState([]);
+  const [mtype, setMtype]       = useState('asset');
+  const [target, setTarget]     = useState('');
+  const [desc, setDesc]         = useState('');
+  const [priority, setPrio]     = useState('normal');
+  const [err, setErr]           = useState('');
+  const [busy, setBusy]         = useState(false);
+  const [loading, setLoading]   = useState(true);
+
   useEffect(()=>{
-    const token=localStorage.getItem("mb_token");
-    if(!token){setChecking(false);return;}
-    api("/api/auth/me").then(u=>{setUser(u);setChecking(false);}).catch(()=>{localStorage.removeItem("mb_token");setChecking(false);});
+    api('/api/missions').then(d=>{ setMissions(d.missions||[]); setLoading(false); }).catch(()=>setLoading(false));
   },[]);
-  if(checking)return<div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:28,height:28,border:"2px solid var(--border2)",borderTop:"2px solid var(--spark)",borderRadius:"50%",animation:"spin 1s linear infinite"}}/></div>;
-  if(!user)return<AuthPage onAuth={u=>setUser(u)}/>;
-  return<MainApp user={user} onLogout={()=>setUser(null)}/>;
+
+  async function create() {
+    if (!target.trim()) { setErr('Enter a target'); return; }
+    setErr(''); setBusy(true);
+    try {
+      const data = await api('/api/missions', { method:'POST', body:{ mission_type:mtype, target:target.trim(), description:desc, priority } });
+      setMissions(prev=>[data.mission,...prev]);
+      setTarget(''); setDesc('');
+      onCreated?.();
+    } catch(e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function cancel(id) {
+    await api(`/api/missions/${id}`,{method:'DELETE'}).catch(()=>{});
+    setMissions(prev=>prev.filter(m=>m.id!==id));
+  }
+
+  const types = [
+    { id:'asset',    icon:'◈', label:'Asset',    example:'NVDA, AAPL' },
+    { id:'sector',   icon:'◫', label:'Sector',   example:'Technology, Energy' },
+    { id:'theme',    icon:'◎', label:'Theme',    example:'AI, Defence' },
+    { id:'region',   icon:'◉', label:'Region',   example:'Middle East, Asia' },
+    { id:'macro',    icon:'◆', label:'Macro',    example:'Fed rates, CPI' },
+    { id:'industry', icon:'◌', label:'Industry', example:'Semiconductors' },
+  ];
+
+  const placeholders = { asset:'e.g. NVDA', sector:'e.g. Technology', theme:'e.g. AI Infrastructure', region:'e.g. Middle East', macro:'e.g. Fed interest rates', industry:'e.g. Semiconductors' };
+
+  return (
+    <div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:15,fontWeight:600,marginBottom:2}}>Missions</div>
+        <div style={{fontSize:11,color:'var(--text2)'}}>Send Sebastian to track an asset, sector, theme, or macro indicator</div>
+      </div>
+
+      <div className="card" style={{marginBottom:24}}>
+        <div className="card-head"><span className="card-title">New Mission</span></div>
+        <div className="card-body">
+          <div style={{marginBottom:14}}>
+            <div className="section-label">Mission Type</div>
+            <div className="mission-type-grid">
+              {types.map(t=>(
+                <button key={t.id} className={`mtype-btn${mtype===t.id?' sel':''}`} onClick={()=>setMtype(t.id)}>
+                  <div className="mtype-icon">{t.icon}</div>
+                  <div>{t.label}</div>
+                  <div style={{fontSize:9,color:'var(--text3)',marginTop:3}}>{t.example}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Target</label>
+            <input value={target} onChange={e=>setTarget(e.target.value)} placeholder={placeholders[mtype]} onKeyDown={e=>e.key==='Enter'&&create()} />
+          </div>
+          <div className="field">
+            <label>Description (optional)</label>
+            <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="What specifically should Sebastian track?" />
+          </div>
+
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+            <span style={{fontSize:11,color:'var(--text2)'}}>Priority:</span>
+            {['normal','high','critical'].map(p=>(
+              <button key={p} className={`btn btn-ghost btn-sm`}
+                style={{borderColor:priority===p?(p==='critical'?'var(--red)':p==='high'?'var(--amber)':'var(--accent)'):'',
+                  color:priority===p?(p==='critical'?'var(--red)':p==='high'?'var(--amber)':'var(--accent)'):'',
+                  textTransform:'uppercase',fontSize:10,fontFamily:'var(--mono)'}}
+                onClick={()=>setPrio(p)}>{p}</button>
+            ))}
+          </div>
+
+          {err && <div className="err-box" style={{marginBottom:12}}>{err}</div>}
+          <button className="btn btn-primary" style={{width:'100%'}} onClick={create} disabled={busy}>
+            {busy ? 'Launching...' : '◎ Launch Mission'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.07em',color:'var(--text2)',marginBottom:10}}>
+        Active Missions ({missions.length})
+      </div>
+      <div className="card">
+        {loading && <div style={{padding:16,color:'var(--text3)',fontSize:12}}>Loading missions...</div>}
+        {!loading && missions.length===0 && (
+          <div className="empty" style={{padding:28}}><h3>No active missions</h3><p>Launch a mission above to start tracking</p></div>
+        )}
+        {missions.map(m=>(
+          <div key={m.id} className="mission-item">
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                <div className="mission-target">{m.target}</div>
+                <span className={`prio-badge prio-${m.priority}`}>{m.priority}</span>
+                <span style={{fontSize:10,color:'var(--text3)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>{m.type}</span>
+              </div>
+              <div className="mission-desc">{m.description?.slice(0,80)}</div>
+            </div>
+            <button className="btn btn-danger btn-sm" onClick={()=>cancel(m.id)} style={{flexShrink:0}}>Cancel</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+/* ═══════════════════════════════════════════════
+   CHAIN STATUS MODAL
+═══════════════════════════════════════════════ */
+function ChainModal({ onClose }) {
+  const [chain, setChain] = useState(null);
+  useEffect(()=>{
+    api('/api/chain/status').then(setChain).catch(()=>{});
+  },[]);
+
+  function statusEl(val) {
+    if (val===true||val==='integrated'||val==='connected') return <span className="chain-ok">✓ active</span>;
+    if (val===false||val==='memory_fallback') return <span className="chain-warn">{typeof val==='string'?val:'✗ inactive'}</span>;
+    return <span className="chain-ok">{val}</span>;
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">Signal Chain — Phase 1 Status</div>
+        {!chain && <div style={{color:'var(--text2)',fontSize:12}}>Checking chain...</div>}
+        {chain && Object.entries(chain.chain).map(([k,v])=>(
+          <div key={k} className="chain-row">
+            <span style={{fontFamily:'var(--mono)',fontSize:11}}>{k.replace(/_/g,' ')}</span>
+            {statusEl(v)}
+          </div>
+        ))}
+        {chain?.counts && (
+          <div style={{marginTop:12,padding:'8px 11px',background:'var(--bg4)',borderRadius:'var(--r)',fontSize:11,color:'var(--text2)',fontFamily:'var(--mono)'}}>
+            {chain.counts.active_catalysts} active catalysts · {chain.counts.missions} missions
+          </div>
+        )}
+        {chain?.warnings?.map((w,i)=>(
+          <div key={i} style={{marginTop:6,fontSize:11,color:'var(--amber)'}}>⚠ {w}</div>
+        ))}
+        <button className="btn btn-ghost" style={{marginTop:16,width:'100%'}} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   ROOT APP
+═══════════════════════════════════════════════ */
+function App() {
+  const [user, setUser]         = useState(null);
+  const [checking, setChecking] = useState(true);
+  const [tab, setTab]           = useState('intelligence');
+  const [catalysts, setCatalysts] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [catsLoading, setCatsLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
+  const [showChain, setShowChain] = useState(false);
+  const [sebQuery, setSebQuery] = useState('');
+  const [refreshTs, setRefreshTs] = useState(null);
+
+  // Restore session
+  useEffect(()=>{
+    if (_token) {
+      api('/api/auth/me').then(u=>{ setUser(u); setChecking(false); })
+        .catch(()=>{ _token=''; localStorage.removeItem('mb_token'); setChecking(false); });
+    } else { setChecking(false); }
+  },[]);
+
+  const fetchCatalysts = useCallback(async()=>{
+    setCatsLoading(true);
+    try {
+      const d = await api('/api/cos/catalysts?status=active');
+      setCatalysts(d.catalysts||[]);
+      setRefreshTs(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}));
+    } catch(e) {}
+    setCatsLoading(false);
+  },[]);
+
+  useEffect(()=>{
+    if (user) {
+      fetchCatalysts();
+      const t = setInterval(fetchCatalysts, 30000);
+      return ()=>clearInterval(t);
+    }
+  },[user, fetchCatalysts]);
+
+  async function handleAttention(catId, state) {
+    await api('/api/cos/attention',{method:'POST',body:{catalyst_id:catId,state}});
+    const update = c => c.id===catId ? {...c,attention:state} : c;
+    setCatalysts(prev=>prev.map(update));
+    setSelected(s=>s?.id===catId ? {...s,attention:state} : s);
+  }
+
+  async function handleVerify(catId) {
+    setVerifying(true);
+    try {
+      const data = await api(`/api/perplexity/verify?catalyst_id=${catId}`,{method:'POST'});
+      setCatalysts(prev=>prev.map(c=>c.id===catId ? {...c, confidence:data.confidence_after, wave:data.wave_after, verified:true} : c));
+      setSelected(s=>s?.id===catId ? {...s, confidence:data.confidence_after, wave:data.wave_after, verified:true} : s);
+    } catch(e) { alert('Verification failed: '+e.message); }
+    setVerifying(false);
+  }
+
+  async function handleDismiss(catId) {
+    await api(`/api/cos/catalyst/${catId}`,{method:'DELETE'});
+    setCatalysts(prev=>prev.filter(c=>c.id!==catId));
+    if (selected?.id===catId) setSelected(null);
+  }
+
+  function handleAskSebastian(q) {
+    setSebQuery(q);
+    setTab('sebastian');
+  }
+
+  function logout() {
+    api('/api/auth/logout',{method:'POST'}).catch(()=>{});
+    _token=''; localStorage.removeItem('mb_token');
+    setUser(null); setCatalysts([]); setSelected(null);
+  }
+
+  if (checking) return <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text3)'}}>Loading...</div>;
+  if (!user)    return <AuthScreen onAuth={setUser} />;
+
+  const focusCount    = catalysts.filter(c=>c.attention==='focus').length;
+  const actionedCount = catalysts.filter(c=>c.attention==='actioned').length;
+  const highConf      = catalysts.filter(c=>c.confidence>=65).length;
+
+  return (
+    <div className="shell">
+      {showChain && <ChainModal onClose={()=>setShowChain(false)} />}
+
+      {/* Topbar */}
+      <div className="topbar">
+        <div style={{display:'flex',alignItems:'center'}}>
+          <div className="logo">
+            <div className="logo-mark">M</div>
+            <span>Market Brain</span>
+          </div>
+          <nav className="nav">
+            {[
+              ['intelligence','Intelligence'],
+              ['sebastian','Sebastian'],
+              ['assets','Assets'],
+              ['missions','Missions'],
+            ].map(([id,label])=>(
+              <button key={id} className={`nav-btn${tab===id?' active':''}`} onClick={()=>setTab(id)}>{label}</button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="topbar-right">
+          {highConf>0 && <span style={{fontSize:11,color:'var(--green)',fontFamily:'var(--mono)'}}>▲ {highConf} high</span>}
+          {focusCount>0 && <span style={{fontSize:11,color:'var(--amber)',fontFamily:'var(--mono)'}}>◉ {focusCount} focus</span>}
+          {actionedCount>0 && <span style={{fontSize:11,color:'var(--green)',fontFamily:'var(--mono)'}}>✓ {actionedCount} actioned</span>}
+          <div className="pill" onClick={()=>setShowChain(true)} data-tip="View signal chain status">
+            <div className="dot" style={{background:'var(--green)'}} />
+            <span style={{fontFamily:'var(--mono)',fontSize:10}}>chain · {refreshTs||'—'}</span>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={fetchCatalysts}>↻</button>
+          <button className="btn btn-ghost btn-sm" onClick={logout} style={{color:'var(--text3)'}}>Sign out</button>
+        </div>
+      </div>
+
+      {/* Main */}
+      <div className="main">
+        {/* Intelligence tab */}
+        {tab==='intelligence' && (
+          <>
+            <CatalystSidebar
+              cats={catalysts}
+              selected={selected}
+              onSelect={setSelected}
+              loading={catsLoading}
+              onNew={()=>setTab('missions')}
+            />
+            <div className="content">
+              <CatalystDetail
+                cat={selected}
+                onAttention={handleAttention}
+                onVerify={handleVerify}
+                onDismiss={handleDismiss}
+                onAskSebastian={handleAskSebastian}
+                verifying={verifying}
+              />
+            </div>
+          </>
+        )}
+
+        {/* Sebastian tab — full width, no sidebar */}
+        {tab==='sebastian' && (
+          <div style={{flex:1,overflow:'hidden'}}>
+            <SebastianTab pendingQuery={sebQuery} onQueryConsumed={()=>setSebQuery('')} />
+          </div>
+        )}
+
+        {/* Assets tab */}
+        {tab==='assets' && (
+          <div className="content" style={{flex:1}}>
+            <AssetsTab onAskSebastian={handleAskSebastian} />
+          </div>
+        )}
+
+        {/* Missions tab */}
+        {tab==='missions' && (
+          <div className="content" style={{flex:1,maxWidth:680}}>
+            <MissionsTab onCreated={fetchCatalysts} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
 </html>
