@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Market Brain — Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --void:#05060a;--surface:#090c12;--panel:#0d1018;--border:#151b26;--border2:#1e2736;
+  --muted:#2a3548;--dim:#3d5068;--text:#c8d8e8;--bright:#e8f0f8;
+  --spark:#f59e0b;--confirmed:#3b82f6;--escalation:#8b5cf6;--structural:#ef4444;--regime:#ff0055;
+  --bull:#10b981;--bear:#f43f5e;--neutral:#64748b;
+  --watch:#f59e0b;--focus:#06b6d4;--actioned:#10b981;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;background:var(--void);color:var(--text);font-family:'Space Mono',monospace;font-size:12px;overflow:hidden;}
+::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border2);}
+.shell{height:100vh;display:grid;grid-template-rows:48px 1fr;}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:14px;z-index:100;}
+.body{display:grid;grid-template-columns:280px 1fr 300px;overflow:hidden;min-height:0;}
+.wordmark{font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:3px;color:var(--bright);white-space:nowrap;}
+.wordmark span{color:var(--spark);}
+.topbar-tabs{display:flex;gap:2px;}
+.tab{padding:6px 14px;font-size:10px;letter-spacing:2px;color:var(--dim);background:transparent;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;font-family:'Space Mono',monospace;}
+.tab.active{color:var(--bright);border-bottom-color:var(--spark);}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--bull);animation:pulse-glow 2s infinite;}
+.sys-label{font-size:9px;color:var(--dim);letter-spacing:1.5px;}
+.icon-btn{background:transparent;border:1px solid var(--border2);border-radius:4px;padding:5px 10px;color:var(--dim);font-size:9px;cursor:pointer;letter-spacing:1px;font-family:'Space Mono',monospace;transition:all .15s;}
+.icon-btn:hover{border-color:var(--spark);color:var(--spark);}
+.col-left{border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
+.col-mid{overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
+.col-right{border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
+.col-header{padding:10px 14px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:sticky;top:0;background:var(--surface);z-index:10;}
+.col-title{font-family:'Syne',sans-serif;font-size:10px;font-weight:700;letter-spacing:3px;color:var(--dim);}
+.badge{font-size:9px;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:1px 7px;}
+.filter-bar{display:flex;gap:4px;padding:8px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.filter-btn{padding:3px 8px;background:transparent;border:1px solid var(--border2);border-radius:2px;font-size:8px;letter-spacing:1px;color:var(--dim);cursor:pointer;font-family:'Space Mono',monospace;transition:all .15s;}
+.filter-btn.active{background:var(--spark)18;border-color:var(--spark);color:var(--spark);}
+.wave-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:6px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.wave-sum-item{text-align:center;}
+.cat-card{padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative;overflow:hidden;transition:background .1s;}
+.cat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;}
+.cat-card.spark::before{background:var(--spark);}
+.cat-card.confirmed::before{background:var(--confirmed);}
+.cat-card.escalation::before{background:var(--escalation);}
+.cat-card.structural::before{background:var(--structural);}
+.cat-card.regime::before{background:var(--regime);}
+.cat-card:hover,.cat-card.sel{background:var(--panel);}
+.cat-title{font-family:'Syne',sans-serif;font-size:11px;font-weight:600;color:var(--bright);line-height:1.3;flex:1;}
+.wave-badge{font-size:8px;letter-spacing:1px;padding:2px 5px;border-radius:2px;font-weight:700;flex-shrink:0;}
+.wave-spark{color:var(--spark);border:1px solid var(--spark)44;background:var(--spark)0f;}
+.wave-confirmed{color:var(--confirmed);border:1px solid var(--confirmed)44;background:var(--confirmed)0f;}
+.wave-escalation{color:var(--escalation);border:1px solid var(--escalation)44;background:var(--escalation)0f;}
+.wave-structural{color:var(--structural);border:1px solid var(--structural)44;background:var(--structural)0f;}
+.wave-regime{color:var(--regime);border:1px solid var(--regime)88;background:var(--regime)18;}
+.dir-tag{font-size:8px;letter-spacing:1px;padding:1px 5px;border-radius:2px;}
+.dir-bull{color:var(--bull);background:var(--bull)15;border:1px solid var(--bull)33;}
+.dir-bear{color:var(--bear);background:var(--bear)15;border:1px solid var(--bear)33;}
+.dir-neutral{color:var(--neutral);background:#ffffff08;border:1px solid var(--muted)44;}
+.conf-bar{flex:1;height:3px;background:var(--border2);border-radius:2px;overflow:hidden;}
+.conf-fill{height:100%;border-radius:2px;transition:width .4s;}
+.attn-dot{width:5px;height:5px;border-radius:50%;}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);}
+.detail-inner{padding:20px;display:flex;flex-direction:column;gap:14px;}
+.sec-title{font-size:9px;letter-spacing:3px;color:var(--dim);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.wave-timeline{display:flex;position:relative;margin:4px 0 12px;}
+.wave-timeline::before{content:'';position:absolute;top:9px;left:0;right:0;height:1px;background:var(--border2);}
+.wave-node{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;position:relative;}
+.wdot{width:10px;height:10px;border-radius:50%;border:2px solid var(--border2);background:var(--panel);}
+.wdot.active{border-color:var(--spark);background:var(--spark);box-shadow:0 0 8px var(--spark)88;}
+.wdot.past{border-color:var(--confirmed);background:var(--confirmed)44;}
+.wlabel{font-size:7px;letter-spacing:.5px;color:var(--muted);text-align:center;}
+.wlabel.active{color:var(--spark);}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+.stat-box{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:8px;}
+.stat-label{font-size:7px;letter-spacing:2px;color:var(--muted);margin-bottom:2px;}
+.stat-val{font-size:11px;font-weight:700;color:var(--bright);font-family:'Syne',sans-serif;}
+.sig-item{padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;}
+.sig-src{font-size:8px;letter-spacing:1px;color:var(--focus);width:70px;flex-shrink:0;}
+.sig-text{font-size:10px;color:var(--text);line-height:1.5;flex:1;}
+.sig-meta{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
+.attn-panel{background:var(--panel);border:1px solid var(--border2);border-radius:4px;padding:12px;}
+.attn-btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;}
+.attn-btn{padding:8px 4px;border-radius:3px;border:1px solid var(--border2);font-size:8px;letter-spacing:1.5px;cursor:pointer;background:transparent;font-family:'Space Mono',monospace;color:var(--dim);transition:all .15s;text-align:center;}
+.attn-btn.w-active,.attn-btn.w-hover:hover{background:var(--watch)18;border-color:var(--watch);color:var(--watch);}
+.attn-btn.f-active,.attn-btn.f-hover:hover{background:var(--focus)18;border-color:var(--focus);color:var(--focus);}
+.attn-btn.a-active,.attn-btn.a-hover:hover{background:var(--actioned)18;border-color:var(--actioned);color:var(--actioned);}
+.pos-form{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.flabel{font-size:8px;letter-spacing:1.5px;color:var(--dim);margin-bottom:3px;}
+.finput{background:var(--surface);border:1px solid var(--border2);border-radius:3px;padding:6px 8px;color:var(--bright);font-family:'Space Mono',monospace;font-size:11px;width:100%;transition:border-color .15s;}
+.finput:focus{outline:none;border-color:var(--actioned);}
+.fselect{background:var(--surface);border:1px solid var(--border2);border-radius:3px;padding:6px 8px;color:var(--bright);font-family:'Space Mono',monospace;font-size:11px;width:100%;}
+.confirm-btn{background:var(--actioned)20;border:1px solid var(--actioned);color:var(--actioned);padding:8px;border-radius:3px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;width:100%;}
+.pf-card{background:var(--panel);border:1px solid var(--border2);border-radius:4px;padding:14px;margin:0 14px 10px;position:relative;overflow:hidden;}
+.pf-card::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;}
+.pf-long::after{background:var(--bull);}
+.pf-short::after{background:var(--bear);}
+.pos-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px;}
+.ps-box{background:var(--surface);border-radius:3px;padding:5px 7px;}
+.ps-label{font-size:7px;letter-spacing:1.5px;color:var(--muted);margin-bottom:1px;}
+.ps-val{font-size:11px;font-weight:700;color:var(--bright);}
+.chip{display:inline-flex;align-items:center;padding:2px 6px;border-radius:2px;font-size:8px;letter-spacing:1px;border:1px solid;}
+.chip-bull{color:var(--bull);border-color:var(--bull)33;background:var(--bull)0d;}
+.chip-bear{color:var(--bear);border-color:var(--bear)33;background:var(--bear)0d;}
+.chip-dim{color:var(--dim);border-color:var(--border2);}
+.chat-fab{position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:var(--spark);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 20px var(--spark)44;z-index:200;transition:transform .2s;font-family:'Syne',sans-serif;color:#000;font-weight:800;}
+.chat-fab:hover{transform:scale(1.1);}
+.chat-panel{position:fixed;bottom:74px;right:20px;width:380px;height:520px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;z-index:200;display:flex;flex-direction:column;box-shadow:0 20px 60px #00000088;}
+.chat-hdr{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
+.chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.msg{max-width:90%;font-size:10px;line-height:1.6;padding:8px 10px;border-radius:4px;}
+.msg-user{background:var(--border);color:var(--bright);align-self:flex-end;border-radius:4px 4px 0 4px;}
+.msg-ai{background:var(--panel);color:var(--text);border:1px solid var(--border2);border-radius:4px 4px 4px 0;align-self:flex-start;}
+.chat-row{padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px;flex-shrink:0;}
+.chat-inp{flex:1;background:var(--panel);border:1px solid var(--border2);border-radius:3px;padding:7px 10px;color:var(--bright);font-family:'Space Mono',monospace;font-size:10px;}
+.chat-inp:focus{outline:none;border-color:var(--spark);}
+.chat-send{background:var(--spark)22;border:1px solid var(--spark);color:var(--spark);padding:6px 12px;border-radius:3px;cursor:pointer;font-size:9px;font-family:'Space Mono',monospace;}
+.modal-bg{position:fixed;inset:0;background:#00000099;z-index:300;display:flex;align-items:center;justify-content:center;}
+.modal-box{background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:24px;width:420px;}
+.new-cat-btn{margin:10px 14px;background:transparent;border:1px dashed var(--border2);border-radius:3px;padding:8px;color:var(--dim);font-size:9px;letter-spacing:2px;cursor:pointer;font-family:'Space Mono',monospace;transition:all .15s;width:calc(100% - 28px);}
+.new-cat-btn:hover{border-color:var(--spark);color:var(--spark);}
+.auth-shell{height:100vh;display:flex;align-items:center;justify-content:center;background:var(--void);}
+.auth-box{width:360px;background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:32px;}
+.auth-field{margin-bottom:14px;}
+.auth-label{font-size:8px;letter-spacing:2px;color:var(--dim);margin-bottom:5px;}
+.auth-input{width:100%;background:var(--panel);border:1px solid var(--border2);border-radius:3px;padding:9px 12px;color:var(--bright);font-family:'Space Mono',monospace;font-size:12px;}
+.auth-input:focus{outline:none;border-color:var(--spark);}
+.auth-btn{width:100%;background:var(--spark)22;border:1px solid var(--spark);color:var(--spark);padding:10px;border-radius:3px;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;cursor:pointer;}
+.auth-err{font-size:9px;color:var(--bear);margin-bottom:10px;padding:6px 8px;background:var(--bear)10;border:1px solid var(--bear)33;border-radius:3px;}
+.loading-bar{height:2px;background:linear-gradient(90deg,transparent,var(--spark),transparent);background-size:200%;animation:load-sweep 1.2s infinite;}
+.fade-in{animation:fade-in .2s ease;}
+@keyframes pulse-glow{0%,100%{box-shadow:0 0 0 0 #10b98166}50%{box-shadow:0 0 0 4px #10b98100}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fade-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes load-sweep{0%{background-position:200%}100%{background-position:-200%}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useRef,useMemo}=React;
+
+const api=async(path,opts={})=>{
+  const token=localStorage.getItem("mb_token");
+  const h={"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})};
+  const r=await fetch(path,{headers:h,...opts});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j.detail||"Error");
+  return j;
+};
+
+const fmtAge=ts=>{const d=Math.floor((Date.now()-ts*1000)/60000);return d<1?"just now":d<60?`${d}m`:d<1440?`${Math.floor(d/60)}h`:`${Math.floor(d/1440)}d`;};
+const fmtExp=ts=>{const d=ts*1000-Date.now();if(d<=0)return"EXPIRED";const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>24?`${Math.floor(h/24)}d`:`${h}h ${m}m`;};
+const cc=v=>v>=75?"#10b981":v>=50?"#3b82f6":v>=30?"#f59e0b":"#f43f5e";
+const WAVES=["spark","confirmed","escalation","structural","regime"];
+const WL={"spark":"SPARK","confirmed":"CONFIRMED","escalation":"ESCALATION","structural":"STRUCTURAL","regime":"REGIME"};
+
+function ConfCircle({value,size=56}){
+  const R=22,C=2*Math.PI*R,fill=(value/100)*C,color=cc(value);
+  return(
+    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+      <svg width={size} height={size} viewBox="0 0 52 52" style={{transform:"rotate(-90deg)"}}>
+        <circle cx="26" cy="26" r={R} fill="none" stroke="var(--border2)" strokeWidth="3"/>
+        <circle cx="26" cy="26" r={R} fill="none" stroke={color} strokeWidth="3"
+          strokeDasharray={`${fill} ${C}`} strokeLinecap="round"/>
+      </svg>
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Syne',sans-serif",fontSize:size>45?15:11,fontWeight:800,color}}>{Math.round(value)}</div>
+    </div>
+  );
+}
+
+function WaveLine({current}){
+  const idx=WAVES.indexOf(current);
+  return(
+    <div className="wave-timeline">
+      {WAVES.map((w,i)=>(
+        <div key={w} className="wave-node">
+          <div className={`wdot ${i===idx?"active":i<idx?"past":""}`}/>
+          <div className={`wlabel ${i===idx?"active":""}`}>{WL[w].slice(0,3)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AuthPage({onAuth}){
+  const[mode,setMode]=useState("login");
+  const[f,setF]=useState({name:"",email:"",password:""});
+  const[err,setErr]=useState("");
+  const[busy,setBusy]=useState(false);
+  const set=k=>e=>setF(p=>({...p,[k]:e.target.value}));
+  const submit=async()=>{
+    setErr("");setBusy(true);
+    try{
+      const isSu=mode==="signup";
+      const body=isSu?f:{email:f.email,password:f.password};
+      const j=await api(isSu?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify(body)});
+      localStorage.setItem("mb_token",j.token);onAuth(j.user);
+    }catch(e){setErr(e.message);}
+    setBusy(false);
+  };
+  return(
+    <div className="auth-shell">
+      <div className="auth-box fade-in">
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,color:"var(--bright)",letterSpacing:2,marginBottom:4}}>MARKET<span style={{color:"var(--spark)"}}>BRAIN</span></div>
+        <div style={{fontSize:9,color:"var(--muted)",letterSpacing:2,marginBottom:24}}>INTELLIGENCE TERMINAL · v2</div>
+        {mode==="signup"&&<div className="auth-field"><div className="auth-label">NAME</div><input className="auth-input" value={f.name} onChange={set("name")} placeholder="Your name"/></div>}
+        <div className="auth-field"><div className="auth-label">EMAIL</div><input className="auth-input" value={f.email} onChange={set("email")} type="email" placeholder="you@example.com"/></div>
+        <div className="auth-field"><div className="auth-label">PASSWORD</div><input className="auth-input" value={f.password} onChange={set("password")} type="password" placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+        {err&&<div className="auth-err">{err}</div>}
+        <button className="auth-btn" onClick={submit} disabled={busy}>{busy?"...":(mode==="login"?"ENTER SYSTEM":"CREATE ACCOUNT")}</button>
+        <div style={{fontSize:9,color:"var(--dim)",textAlign:"center",marginTop:14}}>
+          {mode==="login"?"No account? ":"Have an account? "}
+          <span style={{color:"var(--spark)",cursor:"pointer"}} onClick={()=>{setMode(mode==="login"?"signup":"login");setErr("");}}>{mode==="login"?"Sign up":"Log in"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CatCard({cat,sel,onClick}){
+  const dc=cat.direction==="bullish"?"dir-bull":cat.direction==="bearish"?"dir-bear":"dir-neutral";
+  const dl=cat.direction==="bullish"?"▲ BULL":cat.direction==="bearish"?"▼ BEAR":"◆ NEU";
+  const color=cc(cat.confidence);
+  return(
+    <div className={`cat-card ${cat.wave} ${sel?"sel":""}`} onClick={onClick}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:6}}>
+        <div className="cat-title">{cat.title}</div>
+        <div className={`wave-badge wave-${cat.wave}`}>{WL[cat.wave]}</div>
+      </div>
+      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
+        <span className={`dir-tag ${dc}`}>{dl}</span>
+        <span style={{fontSize:8,color:"var(--dim)",letterSpacing:1}}>{cat.type?.toUpperCase()}</span>
+        {cat.renewal_count>0&&<span style={{fontSize:8,color:"var(--escalation)"}}>×{cat.renewal_count+1}</span>}
+        <div className="attn-dot" style={{background:cat.attention==="actioned"?"var(--actioned)":cat.attention==="focus"?"var(--focus)":"var(--watch)",marginLeft:"auto"}}/>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <div className="conf-bar"><div className="conf-fill" style={{width:`${cat.confidence}%`,background:color}}/></div>
+        <div style={{fontSize:9,fontWeight:700,color,width:28,textAlign:"right"}}>{Math.round(cat.confidence)}</div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:8,color:"var(--muted)"}}>
+        <span>{fmtAge(cat.detected_at)}</span>
+        <span style={{color:cat.expires_at*1000<Date.now()?"var(--bear)":"inherit"}}>exp {fmtExp(cat.expires_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+function AttnPanel({cat,onUpdate}){
+  const[state,setState]=useState(cat.attention||"watch");
+  const[showForm,setShowForm]=useState(cat.attention==="actioned");
+  const[form,setForm]=useState({asset:cat.assets?.[0]||"",direction:cat.direction==="bearish"?"short":"long",entry_price:"",goal_style:"swing",goal_timeline:"",notes:""});
+  const set=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const pick=async s=>{
+    setState(s);
+    if(s==="actioned"){setShowForm(true);return;}
+    setShowForm(false);
+    await api("/api/cos/attention",{method:"POST",body:JSON.stringify({catalyst_id:cat.id,state:s})});
+    onUpdate();
+  };
+  const confirm=async()=>{
+    await api("/api/cos/attention",{method:"POST",body:JSON.stringify({catalyst_id:cat.id,state:"actioned",...form,entry_price:parseFloat(form.entry_price)||null})});
+    onUpdate();
+  };
+  return(
+    <div className="attn-panel">
+      <div style={{fontSize:8,letterSpacing:2,color:"var(--dim)",marginBottom:8}}>ATTENTION STATE</div>
+      <div className="attn-btns">
+        <button className={`attn-btn w-hover ${state==="watch"?"w-active":""}`} onClick={()=>pick("watch")}>WATCH</button>
+        <button className={`attn-btn f-hover ${state==="focus"?"f-active":""}`} onClick={()=>pick("focus")}>FOCUS</button>
+        <button className={`attn-btn a-hover ${state==="actioned"?"a-active":""}`} onClick={()=>pick("actioned")}>ACTIONED</button>
+      </div>
+      {showForm&&(
+        <div className="pos-form">
+          <div style={{fontSize:8,letterSpacing:2,color:"var(--actioned)",marginBottom:4}}>POSITION DETAILS</div>
+          <div className="form-row">
+            <div><div className="flabel">ASSET</div><input className="finput" value={form.asset} onChange={set("asset")} placeholder="AAPL"/></div>
+            <div><div className="flabel">DIRECTION</div><select className="fselect" value={form.direction} onChange={set("direction")}><option value="long">LONG</option><option value="short">SHORT</option></select></div>
+          </div>
+          <div className="form-row">
+            <div><div className="flabel">ENTRY PRICE</div><input className="finput" value={form.entry_price} onChange={set("entry_price")} placeholder="0.00"/></div>
+            <div><div className="flabel">GOAL STYLE</div><select className="fselect" value={form.goal_style} onChange={set("goal_style")}><option value="in_out">IN / OUT</option><option value="swing">SWING</option><option value="long_term">LONG TERM</option></select></div>
+          </div>
+          <div><div className="flabel">TIMELINE</div><input className="finput" value={form.goal_timeline} onChange={set("goal_timeline")} placeholder="e.g. 2–5 days"/></div>
+          <div><div className="flabel">THESIS NOTES</div><input className="finput" value={form.notes} onChange={set("notes")} placeholder="Why this position..."/></div>
+          <button className="confirm-btn" onClick={confirm}>CONFIRM POSITION →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CatDetail({cat,onUpdate,onDismiss}){
+  if(!cat)return(
+    <div className="empty-state">
+      <div style={{fontSize:40,opacity:.2}}>◈</div>
+      <div style={{fontSize:9,letterSpacing:2}}>SELECT A CATALYST</div>
+      <div style={{fontSize:8,color:"var(--border2)",textAlign:"center",maxWidth:220,lineHeight:1.8}}>Catalysts cluster related signals, track confidence decay, and escalate through wave states.</div>
+    </div>
+  );
+  const sigs=[...(cat.signals||[])].reverse();
+  const dc=cat.direction==="bullish"?"chip-bull":cat.direction==="bearish"?"chip-bear":"chip-dim";
+  return(
+    <div className="detail-inner fade-in">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:"var(--bright)",lineHeight:1.2,marginBottom:10}}>{cat.title}</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            <div className={`wave-badge wave-${cat.wave}`}>{WL[cat.wave]}</div>
+            <span className={`chip ${dc}`}>{cat.direction==="bullish"?"▲":cat.direction==="bearish"?"▼":"◆"} {cat.direction?.toUpperCase()}</span>
+            <span className="chip chip-dim">{cat.type?.toUpperCase()}</span>
+            {cat.renewal_count>0&&<span className="chip" style={{color:"var(--escalation)",borderColor:"var(--escalation)44",background:"var(--escalation)0d"}}>RENEWED ×{cat.renewal_count}</span>}
+            {cat.verified&&<span className="chip" style={{color:"var(--bull)",borderColor:"var(--bull)44",background:"var(--bull)0d"}}>✓ VERIFIED</span>}
+          </div>
+        </div>
+        <ConfCircle value={cat.confidence}/>
+      </div>
+
+      <div>
+        <div className="sec-title">WAVE PROGRESSION</div>
+        <WaveLine current={cat.wave}/>
+      </div>
+
+      <div className="stat-grid">
+        <div className="stat-box"><div className="stat-label">DETECTED</div><div className="stat-val">{fmtAge(cat.detected_at)}</div></div>
+        <div className="stat-box"><div className="stat-label">EXPIRES</div><div className="stat-val" style={{color:cat.expires_at*1000<Date.now()?"var(--bear)":"inherit"}}>{fmtExp(cat.expires_at)}</div></div>
+        <div className="stat-box"><div className="stat-label">SIGNALS</div><div className="stat-val">{cat.signals?.length||0}</div></div>
+      </div>
+
+      {(cat.assets?.length>0||cat.sectors?.length>0)&&(
+        <div>
+          <div className="sec-title">SCOPE</div>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+            {cat.assets?.map(a=><span key={a} className="chip chip-dim">{a}</span>)}
+            {cat.sectors?.map(s=><span key={s} style={{fontSize:8,color:"var(--dim)",padding:"2px 6px",border:"1px dashed var(--border2)",borderRadius:2}}>{s}</span>)}
+          </div>
+        </div>
+      )}
+
+      {cat.tags?.length>0&&(
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          {cat.tags.map(t=><span key={t} style={{fontSize:8,color:"var(--muted)",padding:"1px 5px",background:"var(--panel)",border:"1px solid var(--border)",borderRadius:2}}>#{t}</span>)}
+        </div>
+      )}
+
+      <AttnPanel cat={cat} onUpdate={onUpdate}/>
+
+      {sigs.length>0&&(
+        <div>
+          <div className="sec-title">SIGNAL HISTORY ({sigs.length})</div>
+          {sigs.map((s,i)=>(
+            <div key={i} className="sig-item">
+              <div className="sig-src">{s.source?.toUpperCase()}</div>
+              <div className="sig-text">{s.summary}</div>
+              <div className="sig-meta">
+                <div style={{fontSize:9,fontWeight:700,color:cc(s.strength)}}>{Math.round(s.strength)}</div>
+                <div style={{fontSize:8,color:"var(--muted)"}}>{fmtAge(s.ts)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button onClick={onDismiss} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:3,padding:"7px",color:"var(--muted)",fontSize:8,letterSpacing:2,cursor:"pointer",fontFamily:"'Space Mono',monospace"}}>DISMISS CATALYST</button>
+    </div>
+  );
+}
+
+function ChatPanel({onClose,ctx}){
+  const[msgs,setMsgs]=useState([{role:"ai",text:"Intelligence briefing ready. Ask about any catalyst, position, or market condition."}]);
+  const[inp,setInp]=useState("");
+  const[busy,setBusy]=useState(false);
+  const ref=useRef(null);
+  useEffect(()=>{if(ref.current)ref.current.scrollTop=ref.current.scrollHeight;},[msgs]);
+  const send=async()=>{
+    if(!inp.trim()||busy)return;
+    const msg=inp.trim();setInp("");
+    setMsgs(p=>[...p,{role:"user",text:msg}]);
+    setBusy(true);setMsgs(p=>[...p,{role:"ai",text:"…"}]);
+    try{
+      const history=msgs.slice(-8).map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
+      const prefix=ctx?`[Catalyst context: ${ctx.title} — ${ctx.wave} wave, ${Math.round(ctx.confidence)}% confidence] `:"";
+      const j=await api("/api/ai-chat",{method:"POST",body:JSON.stringify({message:prefix+msg,history})});
+      setMsgs(p=>[...p.slice(0,-1),{role:"ai",text:j.response}]);
+    }catch(e){setMsgs(p=>[...p.slice(0,-1),{role:"ai",text:"Error reaching intelligence layer."}]);}
+    setBusy(false);
+  };
+  return(
+    <div className="chat-panel fade-in">
+      <div className="chat-hdr">
+        <div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:12,fontWeight:700,color:"var(--spark)"}}>MARI</div>
+          <div style={{fontSize:8,color:"var(--muted)",letterSpacing:1}}>MARKET AI · INTELLIGENCE</div>
+        </div>
+        <button style={{background:"none",border:"none",color:"var(--dim)",cursor:"pointer",fontSize:14}} onClick={onClose}>✕</button>
+      </div>
+      {ctx&&<div style={{padding:"5px 12px",background:"var(--spark)10",borderBottom:"1px solid var(--spark)22",fontSize:8,color:"var(--spark)",letterSpacing:1}}>◈ {ctx.title.slice(0,45)}{ctx.title.length>45?"...":""}</div>}
+      <div className="chat-msgs" ref={ref}>
+        {msgs.map((m,i)=><div key={i} className={`msg ${m.role==="user"?"msg-user":"msg-ai"}`}>{m.text}</div>)}
+      </div>
+      <div className="chat-row">
+        <input className="chat-inp" value={inp} onChange={e=>setInp(e.target.value)} placeholder="Ask MARI..." onKeyDown={e=>e.key==="Enter"&&send()}/>
+        <button className="chat-send" onClick={send} disabled={busy}>{busy?"...":"→"}</button>
+      </div>
+    </div>
+  );
+}
+
+function NewSignalModal({onCreated,onClose}){
+  const[f,setF]=useState({source:"manual",asset:"",sector:"",direction:"bullish",strength:"65",summary:"",catalyst_type:"asset",tags:""});
+  const[busy,setBusy]=useState(false);
+  const set=k=>e=>setF(p=>({...p,[k]:e.target.value}));
+  const submit=async()=>{
+    if(!f.summary.trim())return;
+    setBusy(true);
+    try{
+      await api("/api/cos/signal",{method:"POST",body:JSON.stringify({...f,strength:parseFloat(f.strength),tags:f.tags.split(",").map(t=>t.trim()).filter(Boolean)})});
+      onCreated();onClose();
+    }catch(e){}
+    setBusy(false);
+  };
+  return(
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:14,fontWeight:700,color:"var(--bright)",letterSpacing:2,marginBottom:16}}>NEW SIGNAL</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div className="form-row">
+            <div><div className="flabel">SOURCE</div><select className="fselect" value={f.source} onChange={set("source")}>{["manual","macro","news","technical","fundamental","geopolitical","sector"].map(s=><option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
+            <div><div className="flabel">TYPE</div><select className="fselect" value={f.catalyst_type} onChange={set("catalyst_type")}>{["asset","sector","macro","geo"].map(t=><option key={t} value={t}>{t.toUpperCase()}</option>)}</select></div>
+          </div>
+          <div className="form-row">
+            <div><div className="flabel">ASSET</div><input className="finput" value={f.asset} onChange={set("asset")} placeholder="NVDA"/></div>
+            <div><div className="flabel">SECTOR</div><input className="finput" value={f.sector} onChange={set("sector")} placeholder="Technology"/></div>
+          </div>
+          <div className="form-row">
+            <div><div className="flabel">DIRECTION</div><select className="fselect" value={f.direction} onChange={set("direction")}><option value="bullish">BULLISH</option><option value="bearish">BEARISH</option><option value="neutral">NEUTRAL</option></select></div>
+            <div><div className="flabel">STRENGTH (0–100)</div><input className="finput" value={f.strength} onChange={set("strength")} type="number" min="0" max="100"/></div>
+          </div>
+          <div><div className="flabel">SIGNAL SUMMARY</div><input className="finput" value={f.summary} onChange={set("summary")} placeholder="Describe what you're seeing..."/></div>
+          <div><div className="flabel">TAGS (comma-separated)</div><input className="finput" value={f.tags} onChange={set("tags")} placeholder="earnings, guidance, macro"/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:4}}>
+            <button onClick={onClose} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:3,padding:8,color:"var(--dim)",fontSize:9,letterSpacing:2,cursor:"pointer",fontFamily:"'Space Mono',monospace"}}>CANCEL</button>
+            <button onClick={submit} disabled={busy} style={{background:"var(--spark)22",border:"1px solid var(--spark)",borderRadius:3,padding:8,color:"var(--spark)",fontSize:9,letterSpacing:2,cursor:"pointer",fontFamily:"'Space Mono',monospace"}}>{busy?"...":"CREATE →"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActionedPanel({catalysts}){
+  const items=catalysts.filter(c=>c.attention==="actioned"&&c.position);
+  if(!items.length)return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,gap:8,color:"var(--muted)"}}>
+      <div style={{fontSize:32,opacity:.15}}>◈</div>
+      <div style={{fontSize:9,letterSpacing:2,textAlign:"center"}}>NO ACTIONED POSITIONS</div>
+      <div style={{fontSize:8,color:"var(--border2)",textAlign:"center",lineHeight:1.6,maxWidth:200}}>Mark a catalyst as Actioned and log your entry to track it here.</div>
+    </div>
+  );
+  return(
+    <div style={{padding:"10px 0",flex:1}}>
+      {items.map(c=>{
+        const p=c.position,isL=p.direction==="long";
+        return(
+          <div key={c.id} className={`pf-card ${isL?"pf-long":"pf-short"}`}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div>
+                <span style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--bright)"}}>{p.asset}</span>
+                <span className={`dir-tag ${isL?"dir-bull":"dir-bear"}`} style={{marginLeft:8}}>{isL?"▲ LONG":"▼ SHORT"}</span>
+              </div>
+              <ConfCircle value={c.confidence} size={40}/>
+            </div>
+            <div className="pos-stats">
+              {[["ENTRY",p.entry_price?`$${p.entry_price}`:"—"],["STYLE",(p.goal_style||"").replace("_"," ").toUpperCase()],["TIMELINE",p.goal_timeline||"—"],["WAVE",WL[c.wave]]].map(([l,v])=>(
+                <div key={l} className="ps-box"><div className="ps-label">{l}</div><div className="ps-val">{v}</div></div>
+              ))}
+            </div>
+            {p.notes&&<div style={{marginTop:8,fontSize:9,color:"var(--dim)",lineHeight:1.6,borderTop:"1px solid var(--border)",paddingTop:6}}>{p.notes}</div>}
+            <div style={{marginTop:6,fontSize:8,color:"var(--muted)"}}>◈ {c.title.slice(0,52)}{c.title.length>52?"...":""}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MainApp({user,onLogout}){
+  const[cats,setCats]=useState([]);
+  const[sel,setSel]=useState(null);
+  const[tab,setTab]=useState("intel");
+  const[filter,setFilter]=useState("all");
+  const[loading,setLoading]=useState(true);
+  const[showChat,setShowChat]=useState(false);
+  const[showNew,setShowNew]=useState(false);
+
+  const load=useCallback(async()=>{
+    try{const j=await api("/api/cos/catalysts?status=active");setCats(j.catalysts||[]);}catch(e){}
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{load();},[]);
+  useEffect(()=>{const t=setInterval(load,30000);return()=>clearInterval(t);},[load]);
+
+  const dismiss=async()=>{
+    if(!sel)return;
+    await api(`/api/cos/catalyst/${sel.id}`,{method:"DELETE"});
+    setSel(null);load();
+  };
+
+  const filtered=useMemo(()=>filter==="all"?cats:cats.filter(c=>c.attention===filter),[cats,filter]);
+  const selLive=useMemo(()=>cats.find(c=>c.id===sel?.id)||sel,[cats,sel]);
+  const actionedCount=cats.filter(c=>c.attention==="actioned").length;
+  const focusCount=cats.filter(c=>c.attention==="focus").length;
+  const wc=w=>cats.filter(c=>c.wave===w).length;
+
+  return(
+    <div className="shell">
+      <div className="topbar">
+        <div className="wordmark">MARKET<span>BRAIN</span></div>
+        <div className="topbar-tabs">
+          {[["intel","INTELLIGENCE"],["actioned","POSITIONS"]].map(([v,l])=>(
+            <button key={v} className={`tab ${tab===v?"active":""}`} onClick={()=>setTab(v)}>{l}</button>
+          ))}
+        </div>
+        <div className="topbar-right">
+          {loading?<div className="loading-bar" style={{width:50,borderRadius:2}}/>:<div className="pulse-dot"/>}
+          <span className="sys-label">{cats.length} CATALYSTS</span>
+          {focusCount>0&&<span className="sys-label" style={{color:"var(--focus)"}}>◈ {focusCount} FOCUS</span>}
+          {actionedCount>0&&<span className="sys-label" style={{color:"var(--actioned)"}}>✓ {actionedCount} ACTIONED</span>}
+          <button className="icon-btn" onClick={()=>setShowNew(true)}>+ SIGNAL</button>
+          <button className="icon-btn" onClick={async()=>{await api("/api/auth/logout",{method:"POST"});localStorage.removeItem("mb_token");onLogout();}} style={{color:"var(--muted)"}}>EXIT</button>
+        </div>
+      </div>
+
+      {tab==="intel"&&(
+        <div className="body">
+          {/* LEFT */}
+          <div className="col-left">
+            <div className="col-header">
+              <div className="col-title">CATALYSTS</div>
+              <span className="badge">{filtered.length}</span>
+            </div>
+            <div className="filter-bar">
+              {[["all","ALL"],["watch","WATCH"],["focus","FOCUS"],["actioned","ACTIONED"]].map(([v,l])=>(
+                <button key={v} className={`filter-btn ${filter===v?"active":""}`} onClick={()=>setFilter(v)}>{l}</button>
+              ))}
+            </div>
+            <div className="wave-summary">
+              {WAVES.map(w=>(
+                <div key={w} className="wave-sum-item">
+                  <div style={{fontSize:11,fontWeight:700,color:wc(w)>0?`var(--${w})`:"var(--border2)",fontFamily:"'Syne',sans-serif"}}>{wc(w)}</div>
+                  <div style={{fontSize:7,color:"var(--muted)"}}>{WL[w].slice(0,3)}</div>
+                </div>
+              ))}
+            </div>
+            {filtered.length===0&&!loading&&(
+              <div style={{padding:24,textAlign:"center",color:"var(--muted)",fontSize:9,letterSpacing:2,lineHeight:2.2}}>
+                NO ACTIVE CATALYSTS<br/><span style={{color:"var(--border2)",fontSize:8}}>Post a signal to begin</span>
+              </div>
+            )}
+            {filtered.map(c=>(
+              <CatCard key={c.id} cat={c} sel={selLive?.id===c.id} onClick={()=>setSel(selLive?.id===c.id?null:c)}/>
+            ))}
+            <button className="new-cat-btn" onClick={()=>setShowNew(true)}>+ NEW SIGNAL</button>
+          </div>
+
+          {/* MID */}
+          <div className="col-mid">
+            <CatDetail cat={selLive} onUpdate={load} onDismiss={dismiss}/>
+          </div>
+
+          {/* RIGHT */}
+          <div className="col-right">
+            <div className="col-header">
+              <div className="col-title">ACTIONED</div>
+              <span className="badge">{actionedCount}</span>
+            </div>
+            <ActionedPanel catalysts={cats}/>
+            {focusCount>0&&(
+              <>
+                <div style={{padding:"10px 14px 6px",borderTop:"1px solid var(--border)",flexShrink:0}}>
+                  <div style={{fontSize:9,letterSpacing:2,color:"var(--focus)"}}>◈ IN FOCUS ({focusCount})</div>
+                </div>
+                {cats.filter(c=>c.attention==="focus").map(c=>(
+                  <div key={c.id} style={{padding:"10px 14px",borderBottom:"1px solid var(--border)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                      <div style={{fontFamily:"'Syne',sans-serif",fontSize:12,fontWeight:700,color:"var(--bright)"}}>{c.assets?.[0]||c.sectors?.[0]||"—"}</div>
+                      <ConfCircle value={c.confidence} size={32}/>
+                    </div>
+                    <div style={{fontSize:9,color:"var(--text)",lineHeight:1.5}}>{c.title}</div>
+                    <div style={{display:"flex",gap:4,marginTop:6,alignItems:"center"}}>
+                      <div className={`wave-badge wave-${c.wave}`}>{WL[c.wave]}</div>
+                      <span style={{fontSize:8,color:"var(--muted)"}}>exp {fmtExp(c.expires_at)}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab==="actioned"&&(
+        <div style={{overflow:"auto",padding:16}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:13,fontWeight:700,color:"var(--bright)",letterSpacing:3,marginBottom:14}}>ACTIONED POSITIONS</div>
+          <ActionedPanel catalysts={cats}/>
+        </div>
+      )}
+
+      <button className="chat-fab" onClick={()=>setShowChat(p=>!p)} title="Ask MARI">◈</button>
+      {showChat&&<ChatPanel onClose={()=>setShowChat(false)} ctx={selLive}/>}
+      {showNew&&<NewSignalModal onCreated={load} onClose={()=>setShowNew(false)}/>}
+    </div>
+  );
+}
+
+function Root(){
+  const[user,setUser]=useState(null);
+  const[checking,setChecking]=useState(true);
+  useEffect(()=>{
+    const token=localStorage.getItem("mb_token");
+    if(!token){setChecking(false);return;}
+    api("/api/auth/me").then(u=>{setUser(u);setChecking(false);}).catch(()=>{localStorage.removeItem("mb_token");setChecking(false);});
+  },[]);
+  if(checking)return<div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:28,height:28,border:"2px solid var(--border2)",borderTop:"2px solid var(--spark)",borderRadius:"50%",animation:"spin 1s linear infinite"}}/></div>;
+  if(!user)return<AuthPage onAuth={u=>setUser(u)}/>;
+  return<MainApp user={user} onLogout={()=>setUser(null)}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>
