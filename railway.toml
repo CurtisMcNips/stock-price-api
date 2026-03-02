@@ -1,7 +1,18 @@
 [build]
 builder = "nixpacks"
+```
 
-[deploy]
-startCommand = "uvicorn app:app --host 0.0.0.0 --port $PORT"
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 3
+Remove the `startCommand` line entirely. Commit.
+
+---
+
+**2. This unlocks both services** — Railway will now let you set start commands manually in the UI.
+
+**web service** → Settings → Custom Start Command → enter:
+```
+uvicorn app:app --host 0.0.0.0 --port $PORT
+```
+
+**focused-vision** → Settings → Custom Start Command → enter:
+```
+python sweep_engine.py
