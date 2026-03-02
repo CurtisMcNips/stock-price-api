@@ -153,6 +153,7 @@ def _load_bots():
         ("bot_fundamentals",     "FundamentalsBot"),
         ("bot_technical_levels", "TechnicalLevelsBot"),
         ("bot_analyst",          "AnalystBot"),
+        ("bot_geo",              "GeoBot"),
     ]
     for module_name, class_name in bot_classes:
         try:
