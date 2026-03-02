@@ -484,6 +484,59 @@ def normalise_symbol(symbol: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# RESEARCH BOTS
+# ═══════════════════════════════════════════════════════════════
+
+try:
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "research_bots"))
+    from orchestrator import run_all_bots as _run_all_bots, run_single_bot as _run_single_bot
+    BOTS_AVAILABLE = True
+    log.info("Research bots loaded")
+except ImportError as e:
+    BOTS_AVAILABLE = False
+    log.warning(f"Research bots not available: {e}")
+
+
+@app.get("/api/research", tags=["Research"])
+async def research(
+    symbol: str = Query(...),
+    bots:   str = Query(default="all"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Run research bots for a ticker. Returns merged signal inputs + bull/bear factors.
+    Served from bot-level cache (2min–6hr per bot). Does NOT post to CoS
+    (that is the sweep engine's job — this is user-triggered, on-demand only).
+    """
+    if not BOTS_AVAILABLE:
+        raise HTTPException(503, "Research bots not available — check research_bots/ folder")
+
+    sym        = normalise_symbol(symbol)
+    asset_meta = {}
+
+    # Enrich with sector/type from universe if available
+    try:
+        universe_raw = await rget("universe:assets")
+        if universe_raw:
+            for asset in json.loads(universe_raw):
+                if asset.get("ticker") == sym:
+                    asset_meta = asset
+                    break
+    except Exception:
+        pass
+
+    if bots == "all":
+        result = await _run_all_bots(sym, asset_meta, post_to_cos=False)
+        return result.to_dict()
+    else:
+        single = await _run_single_bot(bots.strip(), sym, asset_meta)
+        if not single:
+            raise HTTPException(404, f"Bot '{bots}' not found")
+        return single.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════
 # PRICE ENDPOINTS
 # ═══════════════════════════════════════════════════════════════
 
@@ -496,6 +549,8 @@ async def health():
         "version": "3.0.0",
         "redis": "connected" if r else "memory",
         "active_catalysts": len(cats),
+        "research_bots":    BOTS_AVAILABLE,
+        "bot_count":        7 if BOTS_AVAILABLE else 0,
         "timestamp": int(time.time()),
     }
 
