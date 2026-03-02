@@ -301,9 +301,32 @@ async def run_all_bots(
         errors=errors,
     )
 
-    # Post to CoS only from scheduled sweeps, not user-triggered calls
+    # Post to CoS via Relay Bot — clusters, aligns, verifies before posting
     if post_to_cos and overall_conf > 0.25:
-        asyncio.create_task(_post_cos_signal(ticker, asset_meta, research))
+        token = await _get_cos_token()
+        if token:
+            direction = _derive_direction(research.signal_inputs, research.bull_factors, research.bear_factors)
+            strength  = _derive_strength(research.overall_confidence, research.signal_inputs)
+            sector    = (asset_meta or {}).get("sector", "")
+            cat_type  = "macro" if sector in ("ETF", "Forex", "Commodities") else "asset"
+            tags      = [s for s in [sector, (asset_meta or {}).get("sub")] if s]
+            if direction != "neutral": tags.append(direction)
+            top_bull  = research.bull_factors[0] if research.bull_factors else ""
+            top_bear  = research.bear_factors[0] if research.bear_factors else ""
+            if direction == "bullish" and top_bull: summary = f"{ticker}: {top_bull}"
+            elif direction == "bearish" and top_bear: summary = f"{ticker}: {top_bear}"
+            else: summary = f"{ticker}: {top_bull or top_bear or 'Sweep completed'}"
+            try:
+                from relay_bot import relay_signal
+                asyncio.create_task(relay_signal(
+                    ticker=ticker, asset_meta=asset_meta or {},
+                    research=research, cos_token=token,
+                    direction=direction, strength=strength,
+                    summary=summary[:120], tags=tags[:5],
+                ))
+            except ImportError:
+                # Fallback to direct post if relay_bot not available
+                asyncio.create_task(_post_cos_signal(ticker, asset_meta, research))
 
     return research
 
