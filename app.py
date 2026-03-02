@@ -183,29 +183,253 @@ DECAY_RATES = {
     "structural": 0.5, "regime": 0.2,
 }
 
-def determine_wave(renewal_count: int, confidence: float) -> str:
-    if renewal_count == 0:                              return "spark"
-    if renewal_count == 1 and confidence > 45:          return "confirmed"
-    if renewal_count >= 2 and confidence > 60:          return "escalation"
-    if renewal_count >= 4 and confidence > 75:          return "structural"
-    if renewal_count >= 6 and confidence > 88:          return "regime"
+# ── Wave evidence scoring ─────────────────────────────────────
+# Wave transitions are evidence-gated, not just count-based.
+# Each wave has a minimum evidence score plus required conditions.
+
+WAVE_ORDER = ["spark", "confirmed", "escalation", "structural", "regime"]
+
+# Demotion thresholds — if confidence falls below these, wave demotes one level
+WAVE_DEMOTION = {
+    "regime":     80.0,
+    "structural": 65.0,
+    "escalation": 48.0,
+    "confirmed":  30.0,
+    "spark":       0.0,
+}
+
+def _evidence_score(cat: dict) -> dict:
+    """
+    Compute evidence dimensions for a catalyst.
+    Returns a dict of evidence flags used by determine_wave_from_evidence.
+    """
+    signals       = cat.get("signals", [])
+    tags          = set(t.lower() for t in cat.get("tags", []))
+    age_hours     = (time.time() - cat.get("detected_at", time.time())) / 3600
+
+    # Source diversity
+    sources       = set(s.get("source", "") for s in signals if s.get("source"))
+    # Bot names embedded in relay_bot source strings (e.g. "GeoBot+MacroBot+NewsBot")
+    bot_names = set()
+    for src in sources:
+        for part in src.split("+"):
+            bot_names.add(part.strip())
+    distinct_bots = len(bot_names) if bot_names else len(sources)
+
+    # Evidence flags
+    is_verified        = cat.get("verified", False)
+    is_cross_asset     = "cross_asset" in tags
+    is_geo             = cat.get("type") == "geo" or "geo" in tags
+    is_macro           = cat.get("type") == "macro"
+    has_perplexity     = any("perplexity" in s.get("source", "").lower() for s in signals)
+    has_geo_bot        = any("geobot" in s.get("source", "").lower() for s in signals)
+    renewal_count      = cat.get("renewal_count", 0)
+    confidence         = cat.get("confidence", 0.0)
+    has_mission        = bool(cat.get("mission_links") or "mission" in tags)
+    strong_alignment   = "strong" in tags
+    medium_alignment   = "medium" in tags
+
+    return {
+        "distinct_bots":    distinct_bots,
+        "renewal_count":    renewal_count,
+        "confidence":       confidence,
+        "is_verified":      is_verified,
+        "is_cross_asset":   is_cross_asset,
+        "is_geo":           is_geo,
+        "is_macro":         is_macro,
+        "has_perplexity":   has_perplexity,
+        "has_geo_bot":      has_geo_bot,
+        "has_mission":      has_mission,
+        "strong_alignment": strong_alignment,
+        "age_hours":        age_hours,
+    }
+
+
+def _target_wave(ev: dict) -> str:
+    """
+    Determine the maximum wave a catalyst QUALIFIES for based on evidence.
+    Returns the highest wave it can reach — wave logic then applies the
+    one-level-at-a-time rule and demotion checks.
+    """
+    c  = ev["confidence"]
+    b  = ev["distinct_bots"]
+    r  = ev["renewal_count"]
+    v  = ev["is_verified"]
+    ca = ev["is_cross_asset"]
+    ge = ev["is_geo"] or ev["has_geo_bot"]
+    ma = ev["is_macro"]
+    pp = ev["has_perplexity"]
+    sa = ev["strong_alignment"]
+    ag = ev["age_hours"]
+    mi = ev["has_mission"]
+
+    # ── REGIME ────────────────────────────────────────────────────
+    # Highest conviction. Requires strong multi-dimensional evidence.
+    if (
+        c >= 85 and r >= 5 and b >= 4
+        and v and ca
+        and (ge or ma)
+        and ag >= 6
+    ):
+        return "regime"
+
+    # ── STRUCTURAL ────────────────────────────────────────────────
+    # Sustained, verified, cross-confirmed signal.
+    if (
+        c >= 72 and r >= 3 and b >= 3
+        and v and ca
+        and ag >= 2
+    ):
+        return "structural"
+
+    # Geo/macro structural — slightly easier to reach
+    if (
+        c >= 68 and r >= 3 and b >= 3
+        and (v or pp) and (ca or ge)
+        and ag >= 1.5
+    ):
+        return "structural"
+
+    # ── ESCALATION ────────────────────────────────────────────────
+    # Multiple sources + at least one verification or alignment signal.
+    if (
+        c >= 58 and r >= 2 and b >= 2
+        and (v or ca or sa or pp)
+    ):
+        return "escalation"
+
+    # Geo escalation — single strong GeoBot signal can escalate faster
+    if c >= 55 and ge and (v or pp or ca) and r >= 1:
+        return "escalation"
+
+    # Mission-linked catalyst escalates faster
+    if c >= 52 and mi and r >= 2 and b >= 2:
+        return "escalation"
+
+    # ── CONFIRMED ─────────────────────────────────────────────────
+    # At least 2 distinct sources, or 1 source + verification.
+    if c >= 42 and (b >= 2 or (b >= 1 and (v or pp or ca))):
+        return "confirmed"
+
+    if c >= 38 and r >= 1:
+        return "confirmed"
+
+    # ── SPARK ─────────────────────────────────────────────────────
     return "spark"
+
+
+def determine_wave(renewal_count: int, confidence: float) -> str:
+    """
+    Legacy compatibility shim — called where we only have count + confidence.
+    Builds a minimal evidence dict and delegates to the full engine.
+    Used for backward compatibility only; CoS signal handler uses
+    determine_wave_from_evidence directly.
+    """
+    ev = {
+        "distinct_bots": max(1, renewal_count),
+        "renewal_count": renewal_count,
+        "confidence": confidence,
+        "is_verified": confidence > 75,
+        "is_cross_asset": confidence > 80,
+        "is_geo": False,
+        "is_macro": False,
+        "has_perplexity": False,
+        "has_geo_bot": False,
+        "has_mission": False,
+        "strong_alignment": False,
+        "age_hours": renewal_count * 0.5,  # assume 30min per renewal
+    }
+    return _target_wave(ev)
+
+
+def determine_wave_from_evidence(cat: dict) -> tuple:
+    """
+    Full evidence-based wave determination for a catalyst object.
+    Returns (new_wave, previous_wave, promoted, demoted, evidence_dict).
+
+    Rules:
+    - Wave can only advance ONE level per signal (no skipping)
+    - Wave can demote if confidence decays below threshold
+    - Promotion logged with reason
+    """
+    current_wave = cat.get("wave", "spark")
+    ev           = _evidence_score(cat)
+    target       = _target_wave(ev)
+
+    current_idx = WAVE_ORDER.index(current_wave) if current_wave in WAVE_ORDER else 0
+    target_idx  = WAVE_ORDER.index(target)        if target       in WAVE_ORDER else 0
+
+    # One level at a time promotion
+    if target_idx > current_idx:
+        new_idx   = current_idx + 1
+        new_wave  = WAVE_ORDER[new_idx]
+        promoted  = True
+        demoted   = False
+    # Demotion check
+    elif ev["confidence"] < WAVE_DEMOTION.get(current_wave, 0) and current_idx > 0:
+        new_idx  = current_idx - 1
+        new_wave = WAVE_ORDER[new_idx]
+        promoted = False
+        demoted  = True
+    else:
+        new_wave = current_wave
+        promoted = False
+        demoted  = False
+
+    return new_wave, current_wave, promoted, demoted, ev
+
 
 def compute_confidence(signals: list) -> float:
     if not signals: return 0.0
+
+    # Source weights — relay_bot source strings include bot names
     weights = {
-        "geo": 1.4, "macro": 1.2, "fundamental": 1.1, "sector": 1.0,
-        "asset": 0.9, "technical": 0.8, "manual": 0.8, "news": 0.7,
+        "geobot":          1.5,
+        "geo":             1.4,
+        "perplexity":      1.4,
+        "macrobot":        1.3,
+        "macro":           1.2,
+        "fundamentalsbot": 1.2,
+        "fundamental":     1.1,
+        "analystbot":      1.1,
+        "earningsbot":     1.1,
+        "sector":          1.0,
+        "insiderbot":      1.0,
+        "technicallevelsbot": 0.9,
+        "newsbot":         0.85,
+        "asset":           0.9,
+        "technical":       0.8,
+        "manual":          0.8,
+        "news":            0.75,
+        "relay_bot":       1.0,
+        "sweep_engine":    0.85,
     }
+
     total, weighted = 0.0, 0.0
     for s in signals:
-        w = weights.get(s.get("source", "asset"), 0.8)
+        src = s.get("source", "asset").lower()
+        # relay_bot sources are composite strings like "GeoBot+MacroBot+NewsBot"
+        # take the max weight from the composite
+        w = max(
+            (weights.get(part.strip().lower(), 0.85) for part in src.split("+")),
+            default=0.85,
+        )
         weighted += s.get("strength", 50) * w
         total += w
     raw = (weighted / total) if total else 0.0
-    sources = set(s.get("source") for s in signals)
-    if len(sources) >= 3: raw = min(100, raw * 1.15)
-    if len(sources) >= 5: raw = min(100, raw * 1.10)
+
+    # Diversity bonus
+    sources = set(s.get("source", "") for s in signals)
+    if len(sources) >= 3: raw = min(100, raw * 1.12)
+    if len(sources) >= 5: raw = min(100, raw * 1.08)
+
+    # Verified bonus
+    tags = set()
+    for s in signals:
+        tags.update(s.get("tags", []))
+    if "verified" in tags:    raw = min(100, raw * 1.10)
+    if "cross_asset" in tags: raw = min(100, raw * 1.06)
+
     return round(raw, 1)
 
 async def load_catalyst(cat_id: str) -> Optional[dict]:
@@ -252,6 +476,15 @@ async def apply_decay():
             hours = (now - cat["updated_at"]) / 3600
             rate  = DECAY_RATES.get(cat.get("wave", "spark"), 2.0)
             cat["confidence"] = max(0, round(cat["confidence"] - rate * hours, 1))
+            # Re-evaluate wave after decay — may demote
+            new_wave, prev_wave, _, demoted, _ = determine_wave_from_evidence(cat)
+            if demoted:
+                cat["wave"] = new_wave
+                cat.setdefault("wave_history", []).append({
+                    "from": prev_wave, "to": new_wave,
+                    "ts": now, "reason": "confidence decay demotion",
+                })
+                log.info(f"Wave demoted on decay: {cat['id']} {prev_wave}→{new_wave} conf={cat['confidence']}")
             cat["updated_at"] = now
             if cat["confidence"] < 15 and now > cat["expires_at"]:
                 cat["status"] = "expired"
@@ -781,10 +1014,38 @@ async def ingest_signal(signal: CatalystSignal, current_user: dict = Depends(get
         })
         cat["renewal_count"] += 1
         cat["confidence"]     = compute_confidence(cat["signals"])
-        cat["wave"]           = determine_wave(cat["renewal_count"], cat["confidence"])
+        prev_wave             = cat.get("wave", "spark")
+        new_wave, _, promoted, demoted, ev = determine_wave_from_evidence(cat)
+        cat["wave"]           = new_wave
         cat["updated_at"]     = now
         cat["expires_at"]     = now + EXPIRY_HOURS.get(signal.catalyst_type, 9) * 3600
         cat["status"]         = "active"
+        if promoted:
+            cat.setdefault("wave_history", []).append({
+                "from": prev_wave, "to": new_wave,
+                "ts": now, "reason": f"evidence: bots={ev['distinct_bots']} verified={ev['is_verified']} cross_asset={ev['is_cross_asset']}",
+            })
+            log.info(f"Wave promoted: {cat['id']} {prev_wave}→{new_wave} conf={cat['confidence']}")
+            # Persona Bot — explain wave transition async
+            async def _persona_wave(c, pw, nw):
+                try:
+                    pb = get_persona_bot()
+                    if pb:
+                        result = await pb.wave_transition({
+                            "catalyst_id": c["id"],
+                            "catalyst_title": c.get("title", ""),
+                            "from_wave": pw, "to_wave": nw,
+                            "reason": f"bots={ev['distinct_bots']} verified={ev['is_verified']} cross_asset={ev['is_cross_asset']} conf={c['confidence']}",
+                        })
+                        c["wave_explanation"] = result
+                        await save_catalyst(c)
+                except Exception: pass
+            asyncio.create_task(_persona_wave(cat, prev_wave, new_wave))
+        elif demoted:
+            cat.setdefault("wave_history", []).append({
+                "from": prev_wave, "to": new_wave, "ts": now, "reason": "confidence decay demotion",
+            })
+            log.info(f"Wave demoted: {cat['id']} {prev_wave}→{new_wave} conf={cat['confidence']}")
         if signal.asset and signal.asset.upper() not in [a.upper() for a in cat["assets"]]:
             cat["assets"].append(signal.asset)
         if signal.sector and signal.sector.upper() not in [s.upper() for s in cat["sectors"]]:
@@ -850,6 +1111,64 @@ async def get_catalysts(
 ):
     cats = await all_catalysts(status)
     return {"count": len(cats), "catalysts": cats, "timestamp": int(time.time())}
+
+
+
+@app.get("/api/cos/catalyst/{catalyst_id}/wave", tags=["ChiefOfStaff"])
+async def get_catalyst_wave_history(catalyst_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Returns wave history, current evidence score, and what would trigger the next wave.
+    """
+    cat = await load_catalyst(catalyst_id)
+    if not cat: raise HTTPException(404, "Catalyst not found")
+
+    ev          = _evidence_score(cat)
+    current     = cat.get("wave", "spark")
+    current_idx = WAVE_ORDER.index(current) if current in WAVE_ORDER else 0
+    next_wave   = WAVE_ORDER[current_idx + 1] if current_idx < len(WAVE_ORDER) - 1 else None
+
+    # What is needed to reach next wave
+    next_requirements = {}
+    if next_wave == "confirmed":
+        next_requirements = {
+            "need_bots":     max(0, 2 - ev["distinct_bots"]),
+            "need_conf":     max(0, 42 - ev["confidence"]),
+            "need_verified": not ev["is_verified"],
+        }
+    elif next_wave == "escalation":
+        next_requirements = {
+            "need_bots":      max(0, 2 - ev["distinct_bots"]),
+            "need_conf":      max(0, 58 - ev["confidence"]),
+            "need_one_of":    [k for k in ["is_verified","is_cross_asset","has_perplexity"] if not ev[k]],
+        }
+    elif next_wave == "structural":
+        next_requirements = {
+            "need_bots":       max(0, 3 - ev["distinct_bots"]),
+            "need_conf":       max(0, 72 - ev["confidence"]),
+            "need_verified":   not ev["is_verified"],
+            "need_cross_asset": not ev["is_cross_asset"],
+            "need_age_hours":  max(0, 2 - ev["age_hours"]),
+        }
+    elif next_wave == "regime":
+        next_requirements = {
+            "need_bots":        max(0, 4 - ev["distinct_bots"]),
+            "need_conf":        max(0, 85 - ev["confidence"]),
+            "need_verified":    not ev["is_verified"],
+            "need_cross_asset": not ev["is_cross_asset"],
+            "need_geo_or_macro": not (ev["is_geo"] or ev["is_macro"]),
+            "need_age_hours":   max(0, 6 - ev["age_hours"]),
+        }
+
+    return {
+        "catalyst_id":       catalyst_id,
+        "current_wave":      current,
+        "next_wave":         next_wave,
+        "evidence":          ev,
+        "next_requirements": next_requirements,
+        "wave_history":      cat.get("wave_history", []),
+        "wave_explanation":  cat.get("wave_explanation"),
+        "demotion_threshold": WAVE_DEMOTION.get(current, 0),
+    }
 
 
 @app.get("/api/cos/catalyst/{catalyst_id}", tags=["ChiefOfStaff"])
@@ -1281,7 +1600,12 @@ async def run_signal_spotter() -> dict:
     # Escalation candidates
     for cat in cats:
         if cat["renewal_count"] >= 2 and cat["confidence"] > 58 and cat["wave"] == "confirmed":
-            cat["wave"] = determine_wave(cat["renewal_count"], cat["confidence"])
+            new_w, prev_w, promoted, _, _ = determine_wave_from_evidence(cat)
+            if promoted:
+                cat["wave"] = new_w
+                cat.setdefault("wave_history", []).append({
+                    "from": prev_w, "to": new_w, "ts": time.time(), "reason": "signal_spotter promotion",
+                })
             await save_catalyst(cat)
             findings.append({
                 "type":        "wave_transition",
