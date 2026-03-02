@@ -112,9 +112,18 @@ TIER_1 = [
     # Commodities
     {"ticker":"GC=F",    "name":"Gold Futures",     "sector":"Commodities", "sub":"Precious Metals","cap":"Large","vol":"Med",  "asset_type":"commodity"},
     {"ticker":"CL=F",    "name":"Crude Oil WTI",    "sector":"Commodities", "sub":"Energy",        "cap":"Large","vol":"Med",   "asset_type":"commodity"},
+    {"ticker":"BZ=F",    "name":"Brent Crude",      "sector":"Commodities", "sub":"Energy",        "cap":"Large","vol":"Med",   "asset_type":"commodity"},
+    {"ticker":"NG=F",    "name":"Natural Gas",       "sector":"Commodities", "sub":"Energy",        "cap":"Large","vol":"High",  "asset_type":"commodity"},
+    # Shipping — Red Sea / Suez / oil tanker route plays
+    {"ticker":"ZIM",     "name":"ZIM Integrated",   "sector":"Shipping",    "sub":"Container",     "cap":"Mid",  "vol":"High",  "asset_type":"stock"},
+    {"ticker":"FRO",     "name":"Frontline",         "sector":"Shipping",    "sub":"Oil Tanker",    "cap":"Mid",  "vol":"High",  "asset_type":"stock"},
+    {"ticker":"STNG",    "name":"Scorpio Tankers",   "sector":"Shipping",    "sub":"Oil Tanker",    "cap":"Mid",  "vol":"High",  "asset_type":"stock"},
+    # Defence — Middle East escalation
+    {"ticker":"RTX",     "name":"RTX (Raytheon)",    "sector":"Defence",     "sub":"Missiles",      "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    {"ticker":"NOC",     "name":"Northrop Grumman",  "sector":"Defence",     "sub":"Defence",       "cap":"Large","vol":"Low",   "asset_type":"stock"},
     # Forex
-    {"ticker":"EURUSD=X","name":"EUR/USD",          "sector":"Forex",       "sub":"Major Pair",    "cap":"Large","vol":"Low",   "asset_type":"forex"},
-    {"ticker":"GBPUSD=X","name":"GBP/USD",          "sector":"Forex",       "sub":"Major Pair",    "cap":"Large","vol":"Low",   "asset_type":"forex"},
+    {"ticker":"EURUSD=X","name":"EUR/USD",           "sector":"Forex",       "sub":"Major Pair",    "cap":"Large","vol":"Low",   "asset_type":"forex"},
+    {"ticker":"GBPUSD=X","name":"GBP/USD",           "sector":"Forex",       "sub":"Major Pair",    "cap":"Large","vol":"Low",   "asset_type":"forex"},
 ]
 
 TIER_2 = [
@@ -143,19 +152,56 @@ TIER_2 = [
     {"ticker":"RIVN",    "name":"Rivian",           "sector":"Consumer",    "sub":"EV",            "cap":"Mid",  "vol":"VHigh", "asset_type":"stock"},
     {"ticker":"DOGE-USD","name":"Dogecoin",         "sector":"Crypto",      "sub":"Meme",          "cap":"Mid",  "vol":"Extreme","asset_type":"crypto"},
     {"ticker":"AVAX-USD","name":"Avalanche",        "sector":"Crypto",      "sub":"Layer 1",       "cap":"Small","vol":"Extreme","asset_type":"crypto"},
+    # Shipping — extended coverage
+    {"ticker":"MAERSK-B.CO","name":"Maersk",        "sector":"Shipping",    "sub":"Container",     "cap":"Large","vol":"Med",   "asset_type":"stock"},
+    {"ticker":"DHT",     "name":"DHT Holdings",     "sector":"Shipping",    "sub":"Oil Tanker",    "cap":"Small","vol":"High",  "asset_type":"stock"},
+    {"ticker":"INSW",    "name":"Intl Seaways",     "sector":"Shipping",    "sub":"Oil Tanker",    "cap":"Small","vol":"High",  "asset_type":"stock"},
+    {"ticker":"DAC",     "name":"Danaos Corp",      "sector":"Shipping",    "sub":"Container",     "cap":"Small","vol":"High",  "asset_type":"stock"},
+    # Marine insurance / Lloyd's proxies
+    {"ticker":"BEZ.L",   "name":"Beazley",          "sector":"Insurance",   "sub":"Marine/Spec",   "cap":"Mid",  "vol":"Med",   "asset_type":"stock"},
+    {"ticker":"LMRK.L",  "name":"Lloyds of London proxy","sector":"Insurance","sub":"Marine",      "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    # Alternative supply chain / air freight beneficiaries
+    {"ticker":"FDX",     "name":"FedEx",            "sector":"Logistics",   "sub":"Air Freight",   "cap":"Large","vol":"Med",   "asset_type":"stock"},
+    {"ticker":"UPS",     "name":"UPS",              "sector":"Logistics",   "sub":"Air Freight",   "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    {"ticker":"EXPD",    "name":"Expeditors Intl",  "sector":"Logistics",   "sub":"Freight",       "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    # LNG — energy supply disruption
+    {"ticker":"LNG",     "name":"Cheniere Energy",  "sector":"Energy",      "sub":"LNG",           "cap":"Large","vol":"Med",   "asset_type":"stock"},
+    {"ticker":"TELL",    "name":"Tellurian",        "sector":"Energy",      "sub":"LNG",           "cap":"Small","vol":"VHigh", "asset_type":"stock"},
+    # Middle East defence extended
+    {"ticker":"GD",      "name":"General Dynamics", "sector":"Defence",     "sub":"Defence",       "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    {"ticker":"HII",     "name":"Huntington Ingalls","sector":"Defence",    "sub":"Naval",         "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    {"ticker":"BAESY",   "name":"BAE Systems US ADR","sector":"Defence",    "sub":"Defence",       "cap":"Large","vol":"Low",   "asset_type":"stock"},
+    # Commodity safe havens
+    {"ticker":"SI=F",    "name":"Silver Futures",   "sector":"Commodities", "sub":"Precious Metals","cap":"Large","vol":"High", "asset_type":"commodity"},
+    {"ticker":"HG=F",    "name":"Copper Futures",   "sector":"Commodities", "sub":"Base Metals",   "cap":"Large","vol":"Med",   "asset_type":"commodity"},
 ]
 
 # Bot selection by asset type — matches internal doc section 2.1
 BOTS_BY_ASSET_TYPE = {
-    "stock":     ["NewsBot", "EarningsBot", "MacroBot", "InsiderBot", "FundamentalsBot", "TechnicalLevelsBot", "AnalystBot"],
-    "etf":       ["MacroBot", "NewsBot", "TechnicalLevelsBot"],
+    "stock":     ["NewsBot", "EarningsBot", "MacroBot", "InsiderBot", "FundamentalsBot", "TechnicalLevelsBot", "AnalystBot", "GeoBot"],
+    "etf":       ["MacroBot", "NewsBot", "TechnicalLevelsBot", "GeoBot"],
     "crypto":    ["MacroBot", "NewsBot", "TechnicalLevelsBot"],
-    "forex":     ["MacroBot", "TechnicalLevelsBot"],
-    "commodity": ["MacroBot", "TechnicalLevelsBot"],
+    "forex":     ["MacroBot", "TechnicalLevelsBot", "GeoBot"],
+    "commodity": ["MacroBot", "NewsBot", "TechnicalLevelsBot", "GeoBot"],
 }
 
+# Geopolitical sectors — GeoBot always runs on these
+GEO_SENSITIVE_SECTORS = {
+    "Shipping", "Defence", "Energy", "Commodities", "Insurance", "Logistics"
+}
+
+# Dedicated geo scan assets — run independently of normal asset sweeps
+GEO_SCAN_ASSETS = [
+    {"ticker": "GEO:WORLD",      "name": "Global Geo Scan",         "sector": "Geopolitical", "sub": "Global",       "asset_type": "geo"},
+    {"ticker": "GEO:MIDDLEEAST", "name": "Middle East / Iran",      "sector": "Geopolitical", "sub": "MiddleEast",   "asset_type": "geo"},
+    {"ticker": "GEO:SHIPPING",   "name": "Shipping Route Monitor",  "sector": "Geopolitical", "sub": "Shipping",     "asset_type": "geo"},
+    {"ticker": "GEO:ENERGY",     "name": "Energy Supply Monitor",   "sector": "Geopolitical", "sub": "Energy",       "asset_type": "geo"},
+    {"ticker": "GEO:DEFENCE",    "name": "Defence / Conflict",      "sector": "Geopolitical", "sub": "Defence",      "asset_type": "geo"},
+    {"ticker": "GEO:SUPPLYCHAIN","name": "Supply Chain Monitor",    "sector": "Geopolitical", "sub": "Logistics",    "asset_type": "geo"},
+]
+
 # Fast sweep bots — market open sweeps only (08:15, 14:45)
-FAST_SWEEP_BOTS = ["TechnicalLevelsBot", "NewsBot"]
+FAST_SWEEP_BOTS = ["TechnicalLevelsBot", "NewsBot", "GeoBot"]
 
 
 # ── State ────────────────────────────────────────────────────────
@@ -229,8 +275,18 @@ async def _get_watchlist_tickers() -> List[str]:
 def _select_bots_for_asset(asset_meta: dict, fast_sweep: bool, available_bots: list) -> list:
     """Return the subset of loaded bots appropriate for this asset + sweep type."""
     asset_type  = asset_meta.get("asset_type", "stock")
-    allowed_names = FAST_SWEEP_BOTS if fast_sweep else BOTS_BY_ASSET_TYPE.get(asset_type, [])
-    return [b for b in available_bots if b.name in allowed_names]
+    # Geo assets — only GeoBot
+    if asset_type == "geo":
+        return [b for b in available_bots if b.name == "GeoBot"]
+    # Geo-sensitive sectors always include GeoBot even in fast sweeps
+    sector = asset_meta.get("sector", "")
+    if fast_sweep:
+        names = FAST_SWEEP_BOTS if sector not in GEO_SENSITIVE_SECTORS else FAST_SWEEP_BOTS
+    else:
+        names = BOTS_BY_ASSET_TYPE.get(asset_type, [])
+        if sector in GEO_SENSITIVE_SECTORS and "GeoBot" not in names:
+            names = names + ["GeoBot"]
+    return [b for b in available_bots if b.name in names]
 
 
 # ── Core sweep runner ─────────────────────────────────────────────
@@ -284,6 +340,20 @@ async def _run_sweep(
 # ── Sweep schedule ────────────────────────────────────────────────
 # All times UK local (Europe/London). APScheduler handles BST/GMT automatically.
 # Schedule mirrors internal doc section 3.
+
+async def sweep_geo():
+    """
+    Geo Intelligence Sweep — runs every 2 hours, 24/7.
+    Independently scans geopolitical events and posts signals to CoS.
+    Does not depend on market hours — geopolitical events don't wait.
+    GeoBot scans: Middle East, Shipping routes, Energy supply,
+    Defence escalation, Supply chain disruption.
+    """
+    await _run_sweep(
+        "Geo Intelligence Sweep",
+        assets=GEO_SCAN_ASSETS,
+        fast_sweep=False,
+    )
 
 async def sweep_overnight():
     """02:00 UK — Asia mid-session, US post-market winding down."""
@@ -463,6 +533,7 @@ def _add_sweeps():
     scheduler.add_job(sweep_us_close,      CronTrigger(hour=21, minute=15, timezone="Europe/London"), id="us_close")
     scheduler.add_job(sweep_postmarket,    CronTrigger(hour=23, minute=0,  timezone="Europe/London"), id="postmarket")
     # Weekend sweeps
+    scheduler.add_job(sweep_geo,           CronTrigger(hour="*/2", minute=0, timezone="Europe/London"), id="geo_intel")
     scheduler.add_job(sweep_weekend_prep,  CronTrigger(day_of_week="sun", hour=23, minute=30, timezone="Europe/London"), id="weekend_prep")
     scheduler.add_job(sweep_tier3_weekly,  CronTrigger(day_of_week="sun", hour=2,  minute=0,  timezone="Europe/London"), id="tier3_weekly")
     log.info(f"Sweep schedule configured: {len(scheduler.get_jobs())} jobs")
