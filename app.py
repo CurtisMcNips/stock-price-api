@@ -272,6 +272,8 @@ async def decay_loop():
         await asyncio.sleep(900)  # 15 minutes
         try: await apply_decay()
         except Exception as e: log.warning(f"Decay loop error: {e}")
+        try: await run_signal_spotter()
+        except Exception as e: log.warning(f"Spotter loop error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -633,16 +635,29 @@ async def websocket_price(websocket: WebSocket, symbol: str):
 
 
 # ═══════════════════════════════════════════════════════════════
-# AI CHAT — MARI
+# SEBASTIAN — INTERPRETATION ENGINE
 # ═══════════════════════════════════════════════════════════════
 
-@app.post("/api/ai-chat", tags=["Intelligence"])
-async def ai_chat(req: ChatRequest, current_user: dict = Depends(get_current_user)):
+@app.post("/api/sebastian/interpret", tags=["Sebastian"])
+async def sebastian_interpret(req: ChatRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Sebastian interprets catalyst clusters, wave transitions, and signal context.
+    Not a chatbot — a structured interpretation engine.
+    """
     if not ANTHROPIC_KEY:
-        raise HTTPException(503, "AI service not configured — set ANTHROPIC_API_KEY")
+        raise HTTPException(503, "Sebastian not configured — set ANTHROPIC_API_KEY")
     try:
+        # Enrich context with live catalyst state
+        active_cats = await all_catalysts("active")
+        cat_summary = []
+        for c in active_cats[:5]:
+            cat_summary.append(
+                f"[{c['wave'].upper()}] {c['title']} — conf={c['confidence']} dir={c['direction']} assets={c.get('assets',[])}"
+            )
+        catalyst_context = "\n".join(cat_summary) if cat_summary else "No active catalysts."
+
         messages = []
-        for h in (req.history or [])[-10:]:
+        for h in (req.history or [])[-6:]:
             role = h.get("role", "user")
             if role in ("user", "assistant"):
                 messages.append({"role": role, "content": h.get("content", "")})
@@ -658,30 +673,72 @@ async def ai_chat(req: ChatRequest, current_user: dict = Depends(get_current_use
                 },
                 json={
                     "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 1024,
+                    "max_tokens": 800,
                     "system": (
-                        "You are MARI, the Market Intelligence AI for Market Brain. "
-                        "You interpret catalysts, confidence levels, wave states, and market signals. "
-                        "You help the user understand what signals mean for their positions and goals. "
-                        "Wave states: Spark (new, unconfirmed), Confirmed (cross-source validation), "
-                        "Escalation (accelerating signals), Structural (regime-level shift), "
-                        "Regime (paradigm change). "
-                        "Confidence 0-100 decays over time without new signals. "
-                        "Attention states: Watch (on radar), Focus (elevated attention), "
-                        "Actioned (position taken). "
-                        "Be direct, precise, and actionable. Reference specific wave states and "
-                        "confidence levels when relevant. No generic disclaimers."
+                        "You are Sebastian, the interpretation engine for Market Brain. "
+                        "You are not a chatbot. You interpret catalyst clusters, wave transitions, "
+                        "confidence reasoning, and signal alignment. "
+                        "You structure your output clearly — wave state, confidence rationale, "
+                        "signal sources, and what this means for the user's attention. "
+                        "Wave states: Spark → Confirmed → Escalation → Structural → Regime. "
+                        "Confidence 0-100 decays without new signals. "
+                        "Attention: Watch / Focus / Actioned. "
+                        "Current live catalyst state:\n" + catalyst_context + "\n"
+                        "Be precise. Never generic. Reference specific catalysts when relevant."
                     ),
                     "messages": messages,
                 },
                 timeout=30,
             )
             data = r.json()
-            text = data.get("content", [{}])[0].get("text", "No response from AI")
-            return {"response": text}
+            text = data.get("content", [{}])[0].get("text", "Sebastian unavailable")
+            return {"response": text, "engine": "sebastian"}
     except Exception as e:
-        log.error(f"AI chat error: {e}")
-        raise HTTPException(500, f"AI error: {e}")
+        log.error(f"Sebastian error: {e}")
+        raise HTTPException(500, f"Sebastian error: {e}")
+
+
+@app.post("/api/sebastian/summarise", tags=["Sebastian"])
+async def sebastian_summarise(current_user: dict = Depends(get_current_user)):
+    """Generate a structured intelligence brief from all active catalysts."""
+    if not ANTHROPIC_KEY:
+        return {"brief": "Sebastian not configured.", "engine": "sebastian"}
+    active_cats = await all_catalysts("active")
+    if not active_cats:
+        return {"brief": "No active catalysts to summarise.", "engine": "sebastian"}
+
+    cat_lines = []
+    for c in active_cats[:10]:
+        cat_lines.append(
+            f"- [{c['wave'].upper()} | conf={c['confidence']} | {c['direction']}] "
+            f"{c['title']} (assets: {', '.join(c.get('assets', []) or ['sector-wide'])})"
+        )
+    prompt = "Generate a structured intelligence brief from these active catalysts:\n" + "\n".join(cat_lines)
+    prompt += "\n\nFormat: lead with highest conviction catalyst, group by theme, close with attention priorities."
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 600,
+                    "system": "You are Sebastian, Market Brain's interpretation engine. Generate concise, structured intelligence briefs.",
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30,
+            )
+            data = r.json()
+            return {"brief": data.get("content", [{}])[0].get("text", ""), "engine": "sebastian", "catalyst_count": len(active_cats)}
+    except Exception as e:
+        return {"brief": f"Brief unavailable: {e}", "engine": "sebastian"}
+
+
+# Legacy endpoint — kept for backwards compat
+@app.post("/api/ai-chat", tags=["Sebastian"])
+async def ai_chat(req: ChatRequest, current_user: dict = Depends(get_current_user)):
+    return await sebastian_interpret(req, current_user)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -841,8 +898,570 @@ async def trigger_decay(current_user: dict = Depends(get_current_user)):
 
 
 # ═══════════════════════════════════════════════════════════════
-# STATIC / FRONTEND
+# USER PROFILES — watchlist, focus, actioned, preferences
 # ═══════════════════════════════════════════════════════════════
+
+class ProfileUpdate(BaseModel):
+    watchlist:    Optional[List[str]] = None
+    focus_list:   Optional[List[str]] = None
+    preferences:  Optional[dict] = None   # {"horizon": "short"|"long", "risk": "low"|"med"|"high"}
+
+async def load_profile(email: str) -> dict:
+    val = await rget(f"profile:{email}")
+    if val: return json.loads(val)
+    return {"watchlist": [], "focus_list": [], "actioned_assets": [], "preferences": {"horizon": "swing", "risk": "medium"}, "missions": []}
+
+async def save_profile(email: str, profile: dict):
+    await rset(f"profile:{email}", json.dumps(profile))
+
+@app.get("/api/profile", tags=["Profile"])
+async def get_profile(current_user: dict = Depends(get_current_user)):
+    return await load_profile(current_user["email"])
+
+@app.patch("/api/profile", tags=["Profile"])
+async def update_profile(update: ProfileUpdate, current_user: dict = Depends(get_current_user)):
+    profile = await load_profile(current_user["email"])
+    if update.watchlist   is not None: profile["watchlist"]   = update.watchlist
+    if update.focus_list  is not None: profile["focus_list"]  = update.focus_list
+    if update.preferences is not None: profile["preferences"] = {**profile.get("preferences", {}), **update.preferences}
+    await save_profile(current_user["email"], profile)
+    return {"ok": True, "profile": profile}
+
+@app.post("/api/profile/watchlist/{ticker}", tags=["Profile"])
+async def add_to_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
+    profile = await load_profile(current_user["email"])
+    t = ticker.upper()
+    if t not in profile["watchlist"]: profile["watchlist"].append(t)
+    await save_profile(current_user["email"], profile)
+    return {"ok": True, "watchlist": profile["watchlist"]}
+
+@app.delete("/api/profile/watchlist/{ticker}", tags=["Profile"])
+async def remove_from_watchlist(ticker: str, current_user: dict = Depends(get_current_user)):
+    profile = await load_profile(current_user["email"])
+    profile["watchlist"] = [t for t in profile["watchlist"] if t.upper() != ticker.upper()]
+    await save_profile(current_user["email"], profile)
+    return {"ok": True, "watchlist": profile["watchlist"]}
+
+
+# ═══════════════════════════════════════════════════════════════
+# MISSIONS — user-defined intelligence goals
+# ═══════════════════════════════════════════════════════════════
+
+class MissionCreate(BaseModel):
+    mission_type: str          # asset / sector / theme / region / macro / industry
+    target:       str          # "NVDA" / "Technology" / "AI" / "Middle East" / "Fed rates"
+    description:  Optional[str] = ""
+    priority:     str = "normal"   # normal / high / critical
+
+@app.post("/api/missions", tags=["Missions"])
+async def create_mission(req: MissionCreate, current_user: dict = Depends(get_current_user)):
+    """User sends Sebastian on a mission — creates a tracked catalyst target."""
+    mission_id = str(uuid.uuid4())[:8]
+    now = time.time()
+    mission = {
+        "id":           mission_id,
+        "type":         req.mission_type,
+        "target":       req.target,
+        "description":  req.description or f"Track {req.mission_type}: {req.target}",
+        "priority":     req.priority,
+        "status":       "active",
+        "created_by":   current_user["email"],
+        "created_at":   now,
+        "updated_at":   now,
+        "catalyst_ids": [],
+    }
+
+    # Store mission
+    await rset(f"mission:{mission_id}", json.dumps(mission))
+
+    # Create a seed catalyst for the mission so CoS tracks it immediately
+    seed_asset  = req.target if req.mission_type == "asset"  else None
+    seed_sector = req.target if req.mission_type == "sector" else None
+    cat_id = str(uuid.uuid4())[:8]
+    cat = {
+        "id":            cat_id,
+        "title":         f"Mission: Track {req.mission_type} — {req.target}",
+        "type":          "asset" if req.mission_type == "asset" else "macro",
+        "direction":     "neutral",
+        "wave":          "spark",
+        "confidence":    35.0,
+        "renewal_count": 0,
+        "detected_at":   now,
+        "updated_at":    now,
+        "expires_at":    now + 72 * 3600,   # missions live 72h by default
+        "assets":        [seed_asset]  if seed_asset  else [],
+        "sectors":       [seed_sector] if seed_sector else [],
+        "signals":       [{"source": "mission", "strength": 35, "summary": mission["description"], "tags": [req.mission_type], "ts": now}],
+        "summary":       mission["description"],
+        "verified":      False,
+        "attention":     "focus",    # missions start at Focus by default
+        "status":        "active",
+        "tags":          [req.mission_type, req.target.lower()],
+        "position":      None,
+        "created_by":    current_user["email"],
+        "mission_id":    mission_id,
+    }
+    await save_catalyst(cat)
+    mission["catalyst_ids"].append(cat_id)
+    await rset(f"mission:{mission_id}", json.dumps(mission))
+
+    # Add to user profile
+    profile = await load_profile(current_user["email"])
+    profile.setdefault("missions", []).append({"id": mission_id, "target": req.target, "type": req.mission_type})
+    await save_profile(current_user["email"], profile)
+
+    log.info(f"Mission {mission_id} created: {req.mission_type} → {req.target} by {current_user['email']}")
+    return {"ok": True, "mission_id": mission_id, "catalyst_id": cat_id, "mission": mission}
+
+@app.get("/api/missions", tags=["Missions"])
+async def get_missions(current_user: dict = Depends(get_current_user)):
+    keys = await rkeys("mission:*")
+    missions = []
+    for key in keys:
+        val = await rget(key)
+        if val:
+            m = json.loads(val)
+            if m.get("created_by") == current_user["email"] and m.get("status") == "active":
+                missions.append(m)
+    missions.sort(key=lambda m: m.get("created_at", 0), reverse=True)
+    return {"missions": missions, "count": len(missions)}
+
+@app.delete("/api/missions/{mission_id}", tags=["Missions"])
+async def cancel_mission(mission_id: str, current_user: dict = Depends(get_current_user)):
+    val = await rget(f"mission:{mission_id}")
+    if not val: raise HTTPException(404, "Mission not found")
+    m = json.loads(val)
+    if m.get("created_by") != current_user["email"]: raise HTTPException(403, "Not your mission")
+    m["status"] = "cancelled"
+    await rset(f"mission:{mission_id}", json.dumps(m))
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════
+# PERPLEXITY — VERIFICATION ENGINE
+# ═══════════════════════════════════════════════════════════════
+
+PERPLEXITY_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
+PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions"
+_perplexity_last_call = 0.0
+PERPLEXITY_RATE_LIMIT = 2.0   # minimum seconds between calls
+
+async def perplexity_verify(query: str, context: str = "") -> dict:
+    """Call Perplexity to verify a signal. Returns verification_score + reasoning."""
+    global _perplexity_last_call
+    if not PERPLEXITY_KEY:
+        return {"verified": False, "score": 0.0, "reasoning": "Perplexity not configured", "sources": []}
+
+    # Rate limiting
+    elapsed = time.time() - _perplexity_last_call
+    if elapsed < PERPLEXITY_RATE_LIMIT:
+        await asyncio.sleep(PERPLEXITY_RATE_LIMIT - elapsed)
+
+    prompt = (
+        f"Verify this market signal and assess its credibility:\n\n"
+        f"Signal: {query}\n"
+        f"Context: {context}\n\n"
+        f"Respond in JSON only:\n"
+        f'{{"verified": true/false, "confidence_score": 0-100, '
+        f'"sentiment": "bullish"|"bearish"|"neutral", '
+        f'"geopolitical_context": "brief if relevant", '
+        f'"reliability": "high"|"medium"|"low", '
+        f'"reasoning": "2-3 sentences", '
+        f'"sources_found": ["source1", "source2"]}}'
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                PERPLEXITY_URL,
+                headers={"Authorization": f"Bearer {PERPLEXITY_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.1-sonar-large-128k-online",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 400,
+                    "temperature": 0.1,
+                },
+            )
+            _perplexity_last_call = time.time()
+            if r.status_code != 200:
+                return {"verified": False, "score": 0.0, "reasoning": f"Perplexity error {r.status_code}", "sources": []}
+
+            text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            # Strip markdown fences if present
+            text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            result = json.loads(text)
+            score  = float(result.get("confidence_score", 50))
+            return {
+                "verified":            result.get("verified", False),
+                "score":               score,
+                "sentiment":           result.get("sentiment", "neutral"),
+                "geopolitical_context":result.get("geopolitical_context", ""),
+                "reliability":         result.get("reliability", "medium"),
+                "reasoning":           result.get("reasoning", ""),
+                "sources":             result.get("sources_found", []),
+            }
+    except Exception as e:
+        log.warning(f"Perplexity error: {e}")
+        return {"verified": False, "score": 0.0, "reasoning": str(e), "sources": []}
+
+
+@app.post("/api/perplexity/verify", tags=["Verification"])
+async def verify_signal(
+    catalyst_id: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Verify a catalyst against Perplexity web search. Updates catalyst confidence."""
+    cat = await load_catalyst(catalyst_id)
+    if not cat: raise HTTPException(404, "Catalyst not found")
+
+    query   = cat.get("title", cat.get("summary", "market signal"))
+    context = f"Assets: {', '.join(cat.get('assets', []))}. Wave: {cat['wave']}. Direction: {cat['direction']}."
+    result  = await perplexity_verify(query, context)
+
+    # Apply verification to catalyst confidence
+    if result.get("verified"):
+        boost = min(15.0, result["score"] * 0.15)
+        cat["confidence"] = min(100.0, cat["confidence"] + boost)
+        cat["verified"]   = True
+        cat["signals"].append({
+            "source": "perplexity", "strength": result["score"],
+            "summary": result["reasoning"][:120], "tags": ["verified"], "ts": time.time(),
+        })
+        cat["wave"] = determine_wave(cat["renewal_count"], cat["confidence"])
+        await save_catalyst(cat)
+
+    return {
+        "catalyst_id": catalyst_id,
+        "verification": result,
+        "confidence_after": cat["confidence"],
+        "wave_after": cat["wave"],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# SIGNAL SPOTTER — anomaly + alignment detection
+# ═══════════════════════════════════════════════════════════════
+
+_spotter_last_run = 0.0
+
+async def run_signal_spotter() -> dict:
+    """
+    Scans all active catalysts for:
+    - multi-source alignment (3+ sources → boost confidence)
+    - cross-asset alignment (same sector/direction)
+    - stale signals that haven't renewed (flag for decay)
+    - escalation candidates (renewal_count threshold crossing)
+    Returns list of detected anomalies / candidates.
+    """
+    global _spotter_last_run
+    now = time.time()
+    cats = await all_catalysts("active")
+    findings = []
+
+    # Group by direction + sector
+    sector_groups: Dict[str, list] = {}
+    for cat in cats:
+        for sector in cat.get("sectors", []):
+            key = f"{sector}:{cat['direction']}"
+            sector_groups.setdefault(key, []).append(cat)
+
+    # Cross-asset alignment: 3+ catalysts in same sector+direction
+    for key, group in sector_groups.items():
+        if len(group) >= 3:
+            sector, direction = key.split(":", 1)
+            findings.append({
+                "type":      "cross_asset_alignment",
+                "sector":    sector,
+                "direction": direction,
+                "count":     len(group),
+                "catalyst_ids": [c["id"] for c in group],
+                "message":   f"{len(group)} catalysts aligned {direction} in {sector} — sector rotation signal",
+            })
+            # Boost all catalysts in this group
+            for cat in group:
+                cat["confidence"] = min(100, cat["confidence"] + 5)
+                await save_catalyst(cat)
+
+    # Multi-source alignment within single catalyst
+    for cat in cats:
+        sources = set(s.get("source") for s in cat.get("signals", []))
+        if len(sources) >= 4 and cat["wave"] not in ("structural", "regime"):
+            findings.append({
+                "type":        "multi_source_alignment",
+                "catalyst_id": cat["id"],
+                "sources":     list(sources),
+                "message":     f"{cat['title'][:60]} — {len(sources)} sources aligned. Escalation candidate.",
+            })
+
+    # Escalation candidates
+    for cat in cats:
+        if cat["renewal_count"] >= 2 and cat["confidence"] > 58 and cat["wave"] == "confirmed":
+            cat["wave"] = determine_wave(cat["renewal_count"], cat["confidence"])
+            await save_catalyst(cat)
+            findings.append({
+                "type":        "wave_transition",
+                "catalyst_id": cat["id"],
+                "new_wave":    cat["wave"],
+                "message":     f"{cat['title'][:60]} → wave transition to {cat['wave']}",
+            })
+
+    _spotter_last_run = now
+    log.info(f"Signal Spotter: {len(findings)} findings from {len(cats)} catalysts")
+    return {"findings": findings, "catalysts_scanned": len(cats), "timestamp": int(now)}
+
+
+@app.post("/api/spotter/run", tags=["SignalSpotter"])
+async def trigger_spotter(current_user: dict = Depends(get_current_user)):
+    result = await run_signal_spotter()
+    return result
+
+@app.get("/api/spotter/status", tags=["SignalSpotter"])
+async def spotter_status(current_user: dict = Depends(get_current_user)):
+    return {"last_run": int(_spotter_last_run), "status": "active"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# PERSONA — summary generation
+# ═══════════════════════════════════════════════════════════════
+
+async def generate_catalyst_summary(cat: dict) -> str:
+    """Generate a 2-sentence Persona summary for a catalyst."""
+    if not ANTHROPIC_KEY:
+        return f"{cat['wave'].capitalize()} signal: {cat['title']}. Confidence {cat['confidence']}."
+    try:
+        signals_text = ". ".join(s.get("summary", "") for s in cat.get("signals", [])[-3:] if s.get("summary"))
+        prompt = (
+            f"Write a 2-sentence intelligence summary for this market catalyst.\n"
+            f"Title: {cat['title']}\n"
+            f"Wave: {cat['wave']} | Confidence: {cat['confidence']} | Direction: {cat['direction']}\n"
+            f"Signal sources: {signals_text}\n"
+            f"Assets: {', '.join(cat.get('assets', []))}\n"
+            f"Be specific and direct. No disclaimers."
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 150,
+                    "system": "You are Persona, Market Brain's summary generation engine. Write precise 2-sentence catalyst summaries.",
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=15,
+            )
+            return r.json().get("content", [{}])[0].get("text", cat["title"])
+    except Exception as e:
+        return f"{cat['wave'].capitalize()}: {cat['title']} — conf {cat['confidence']}"
+
+@app.post("/api/persona/summarise/{catalyst_id}", tags=["Persona"])
+async def persona_summarise(catalyst_id: str, current_user: dict = Depends(get_current_user)):
+    cat = await load_catalyst(catalyst_id)
+    if not cat: raise HTTPException(404, "Catalyst not found")
+    summary = await generate_catalyst_summary(cat)
+    cat["persona_summary"] = summary
+    cat["updated_at"] = time.time()
+    await save_catalyst(cat)
+    return {"catalyst_id": catalyst_id, "summary": summary}
+
+@app.post("/api/persona/brief", tags=["Persona"])
+async def persona_brief(current_user: dict = Depends(get_current_user)):
+    """Generate the full daily intelligence brief."""
+    return await sebastian_summarise(current_user)
+
+
+# ═══════════════════════════════════════════════════════════════
+# HYPER-FOCUS — attention management + daily briefs
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/hyperfocus/brief", tags=["HyperFocus"])
+async def hyperfocus_brief(current_user: dict = Depends(get_current_user)):
+    """
+    Hyper-Focus daily brief: catalysts relevant to user's watchlist + focus list.
+    Sorted by confidence descending. Includes attention state.
+    """
+    profile = await load_profile(current_user["email"])
+    watchlist  = [t.upper() for t in profile.get("watchlist", [])]
+    focus_list = [t.upper() for t in profile.get("focus_list", [])]
+    tracked    = set(watchlist + focus_list)
+
+    all_cats = await all_catalysts("active")
+
+    # Personal catalysts — on user's watchlist/focus
+    personal = []
+    general  = []
+    for cat in all_cats:
+        cat_assets  = [a.upper() for a in cat.get("assets",  [])]
+        cat_sectors = [s.upper() for s in cat.get("sectors", [])]
+        is_personal = any(t in tracked for t in cat_assets + cat_sectors)
+        if is_personal:
+            personal.append(cat)
+        else:
+            general.append(cat)
+
+    personal.sort(key=lambda c: c.get("confidence", 0), reverse=True)
+    general.sort( key=lambda c: c.get("confidence", 0), reverse=True)
+
+    # Promote focus-list catalysts
+    focus_cats = [c for c in personal if any(a.upper() in focus_list for a in c.get("assets", []))]
+
+    return {
+        "user":         current_user["email"],
+        "watchlist":    watchlist,
+        "focus_list":   focus_list,
+        "focus_catalysts":    focus_cats[:5],
+        "personal_catalysts": personal[:10],
+        "general_catalysts":  general[:5],
+        "total_active":       len(all_cats),
+        "timestamp":          int(time.time()),
+    }
+
+@app.get("/api/hyperfocus/attention", tags=["HyperFocus"])
+async def attention_summary(current_user: dict = Depends(get_current_user)):
+    """All catalysts grouped by attention state."""
+    cats = await all_catalysts("active")
+    by_state: Dict[str, list] = {"watch": [], "focus": [], "actioned": []}
+    for cat in cats:
+        state = cat.get("attention", "watch")
+        if state in by_state:
+            by_state[state].append(cat)
+    return {"attention": by_state, "timestamp": int(time.time())}
+
+
+# ═══════════════════════════════════════════════════════════════
+# ASSETS PAGE — intelligence index
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/assets", tags=["Assets"])
+async def get_assets_intelligence(current_user: dict = Depends(get_current_user)):
+    """
+    Intelligence index for the Assets page.
+    Shows all tracked assets with linked catalyst state.
+    Not a price grid — an intelligence index.
+    """
+    profile  = await load_profile(current_user["email"])
+    watchlist  = [t.upper() for t in profile.get("watchlist", [])]
+    focus_list = [t.upper() for t in profile.get("focus_list", [])]
+
+    # Build asset index from active catalysts
+    all_cats   = await all_catalysts("active")
+    asset_index: Dict[str, dict] = {}
+
+    for cat in all_cats:
+        for asset in cat.get("assets", []):
+            t = asset.upper()
+            if t not in asset_index:
+                asset_index[t] = {
+                    "ticker":     t,
+                    "catalysts":  [],
+                    "top_wave":   "spark",
+                    "top_conf":   0.0,
+                    "direction":  "neutral",
+                    "attention":  "none",
+                    "on_watchlist": t in watchlist,
+                    "on_focus":    t in focus_list,
+                    "sector":     (cat.get("sectors") or [""])[0],
+                }
+            asset_index[t]["catalysts"].append({
+                "id":         cat["id"],
+                "wave":       cat["wave"],
+                "confidence": cat["confidence"],
+                "direction":  cat["direction"],
+                "attention":  cat.get("attention", "watch"),
+                "title":      cat["title"][:80],
+            })
+            if cat["confidence"] > asset_index[t]["top_conf"]:
+                asset_index[t]["top_conf"]  = cat["confidence"]
+                asset_index[t]["top_wave"]  = cat["wave"]
+                asset_index[t]["direction"] = cat["direction"]
+                asset_index[t]["attention"] = cat.get("attention", "watch")
+
+    # Add watchlist assets not yet in any catalyst
+    for ticker in watchlist:
+        if ticker not in asset_index:
+            asset_index[ticker] = {
+                "ticker": ticker, "catalysts": [], "top_wave": None,
+                "top_conf": 0.0, "direction": "neutral", "attention": "watch",
+                "on_watchlist": True, "on_focus": ticker in focus_list, "sector": "",
+            }
+
+    assets = sorted(asset_index.values(), key=lambda a: a["top_conf"], reverse=True)
+    return {"assets": assets, "count": len(assets), "timestamp": int(time.time())}
+
+
+# ═══════════════════════════════════════════════════════════════
+# RELAY BOT — signal clustering endpoint
+# ═══════════════════════════════════════════════════════════════
+
+class RelaySignalBatch(BaseModel):
+    signals: List[CatalystSignal]
+
+@app.post("/api/relay/ingest", tags=["Relay"])
+async def relay_ingest(batch: RelaySignalBatch, current_user: dict = Depends(get_current_user)):
+    """
+    Relay Bot endpoint. Accepts a batch of raw signals, clusters them, then
+    forwards distinct clusters to the CoS. Prevents duplicate signals flooding.
+    """
+    now = time.time()
+    results = []
+
+    # Group by (asset|sector, direction) — only forward one per group per 15 minutes
+    clusters: Dict[str, CatalystSignal] = {}
+    for sig in batch.signals:
+        cluster_key = f"{(sig.asset or sig.sector or 'global').upper()}:{sig.direction}"
+        existing = clusters.get(cluster_key)
+        if not existing or sig.strength > existing.strength:
+            clusters[cluster_key] = sig
+
+    for key, sig in clusters.items():
+        # Use ingest_signal logic — reuse the endpoint logic directly
+        class _FakeUser: email = current_user["email"]
+        result = await ingest_signal(sig, current_user)
+        results.append({"key": key, "result": result})
+
+    return {"clustered": len(clusters), "original": len(batch.signals), "results": results}
+
+
+# ═══════════════════════════════════════════════════════════════
+# CHAIN STATUS — Phase 1 verification
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/chain/status", tags=["Chain"])
+async def chain_status(current_user: dict = Depends(get_current_user)):
+    """
+    Phase 1 verification endpoint. Reports status of every link in the signal chain.
+    """
+    r = await get_redis()
+    active_cats = await all_catalysts("active")
+    missions_keys = await rkeys("mission:*")
+
+    return {
+        "chain": {
+            "redis":          "connected" if r else "memory_fallback",
+            "research_bots":  BOTS_AVAILABLE,
+            "sweep_engine":   "external_service",  # deployed as separate Railway service
+            "relay_bot":      "integrated",
+            "signal_spotter": "integrated",
+            "sebastian":      bool(ANTHROPIC_KEY),
+            "perplexity":     bool(PERPLEXITY_KEY),
+            "chief_of_staff": True,
+            "persona":        bool(ANTHROPIC_KEY),
+            "hyper_focus":    True,
+            "dashboard":      True,
+        },
+        "counts": {
+            "active_catalysts": len(active_cats),
+            "missions":         len(missions_keys),
+        },
+        "warnings": [
+            *(["PERPLEXITY_API_KEY not set — verification disabled"] if not PERPLEXITY_KEY else []),
+            *(["ANTHROPIC_API_KEY not set — Sebastian + Persona disabled"] if not ANTHROPIC_KEY else []),
+            *(["Redis not connected — using memory fallback"] if not r else []),
+        ],
+        "timestamp": int(time.time()),
+    }
+
+
 
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
