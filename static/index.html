@@ -1,1048 +1,1236 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Market Brain</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Market Brain v7</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Barlow+Condensed:wght@400;600;700;900&display=swap" rel="stylesheet"/>
 <style>
-:root {
-  --bg:        #09090b;
-  --bg2:       #0f1013;
-  --bg3:       #16181d;
-  --bg4:       #1c1f27;
-  --border:    #1e2230;
-  --border2:   #252d40;
-  --text:      #c8d0e0;
-  --text2:     #6b7590;
-  --text3:     #3d4560;
-  --accent:    #3d7fff;
-  --accent-lo: rgba(61,127,255,0.12);
-  --green:     #22d48a;
-  --green-lo:  rgba(34,212,138,0.1);
-  --red:       #e05555;
-  --red-lo:    rgba(224,85,85,0.1);
-  --amber:     #f0a030;
-  --amber-lo:  rgba(240,160,48,0.1);
-  --purple:    #a07aff;
-  --purple-lo: rgba(160,122,255,0.1);
-  --spark:          #4a9de0;
-  --confirmed:      #22d48a;
-  --escalation:     #f0a030;
-  --structural:     #b06aff;
-  --regime:         #e05555;
-  --font: -apple-system, 'SF Pro Display', 'Inter', sans-serif;
-  --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  --r: 6px;
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#020207;color:#c8cce8;font-family:'IBM Plex Mono',monospace;height:100vh;overflow:hidden;font-size:11px;}
+:root{
+  --bg0:#020207;--bg1:#05050f;--bg2:#08081a;--bg3:#0d0d22;
+  --border:#111128;--border2:#1a1a35;
+  --text:#c8cce8;--text2:#6a6a9a;--text3:#2e2e50;
+  --blue:#3d9eff;--green:#00d68f;--red:#ff4d6a;--yellow:#f5c842;--orange:#ff7a3d;--purple:#a78bfa;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; height: 100vh; overflow: hidden; }
-#root { height: 100vh; }
+::-webkit-scrollbar{width:3px;height:3px;}
+::-webkit-scrollbar-track{background:var(--bg1);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes slidein{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+.card-enter{animation:fadeUp 0.18s ease forwards;}
+input,button{font-family:inherit;outline:none;}
+button{cursor:pointer;}
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 3px; height: 3px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+/* ── WAVE BADGE COLOURS ── */
+.wave-spark{color:#888;border-color:#33333a;}
+.wave-confirmed{color:var(--blue);border-color:#1e3a5f;}
+.wave-escalation{color:var(--yellow);border-color:#3d3010;}
+.wave-structural{color:var(--orange);border-color:#3d1a08;}
+.wave-regime{color:var(--red);border-color:#3d0818;}
 
-/* ── Layout ── */
-.shell { display: flex; flex-direction: column; height: 100vh; }
-.topbar { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 16px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.logo { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; display: flex; align-items: center; gap: 8px; }
-.logo-mark { width: 20px; height: 20px; border-radius: 5px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: 800; }
-.nav { display: flex; gap: 1px; margin-left: 20px; }
-.nav-btn { padding: 5px 12px; border-radius: var(--r); font-size: 12px; color: var(--text2); cursor: pointer; border: none; background: none; font-family: var(--font); transition: all 0.12s; }
-.nav-btn:hover { color: var(--text); }
-.nav-btn.active { color: var(--text); background: var(--bg4); }
-.topbar-right { display: flex; align-items: center; gap: 8px; }
-.pill { padding: 3px 9px; border-radius: 20px; font-size: 11px; font-family: var(--mono); border: 1px solid var(--border); color: var(--text2); display: flex; align-items: center; gap: 5px; cursor: pointer; transition: border-color 0.15s; }
-.pill:hover { border-color: var(--border2); }
-.dot { width: 6px; height: 6px; border-radius: 50%; }
+/* ── BIAS ── */
+.bias-bullish{color:var(--green);}
+.bias-bearish{color:var(--red);}
+.bias-neutral{color:var(--text2);}
 
-/* ── Buttons ── */
-.btn { padding: 6px 13px; border-radius: var(--r); font-size: 12px; cursor: pointer; border: none; font-family: var(--font); transition: all 0.12s; }
-.btn-primary { background: var(--accent); color: #fff; font-weight: 500; }
-.btn-primary:hover { background: #5590ff; }
-.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
-.btn-ghost:hover { color: var(--text); border-color: var(--border2); }
-.btn-sm { padding: 4px 10px; font-size: 11px; }
-.btn-danger { background: transparent; color: var(--red); border: 1px solid transparent; }
-.btn-danger:hover { border-color: var(--red); }
+/* ── CARD ── */
+.intel-card{
+  background:var(--bg1);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:8px 9px;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+  transition:border-color 0.15s, background 0.15s;
+}
+.intel-card:hover{border-color:var(--border2);background:var(--bg2);}
+.intel-card.selected{border-color:var(--blue);background:var(--bg2);}
+.intel-card .accent-bar{position:absolute;top:0;left:0;right:0;height:1.5px;}
 
-/* ── Main ── */
-.main { display: flex; flex: 1; overflow: hidden; }
-.sidebar { width: 288px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
-.sidebar-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-.sidebar-scroll { flex: 1; overflow-y: auto; }
-.content { flex: 1; overflow-y: auto; padding: 24px; }
+/* ── BAR ── */
+.bar-track{height:2px;background:var(--bg3);border-radius:1px;overflow:hidden;}
+.bar-fill{height:100%;border-radius:1px;}
 
-/* ── Badges ── */
-.wave-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; font-family: var(--mono); }
-.wave-spark       { background: rgba(74,157,224,0.12); color: var(--spark);       border: 1px solid rgba(74,157,224,0.25); }
-.wave-confirmed   { background: rgba(34,212,138,0.12); color: var(--confirmed);   border: 1px solid rgba(34,212,138,0.25); }
-.wave-escalation  { background: rgba(240,160,48,0.12); color: var(--escalation);  border: 1px solid rgba(240,160,48,0.25); }
-.wave-structural  { background: rgba(176,106,255,0.12); color: var(--structural); border: 1px solid rgba(176,106,255,0.25); }
-.wave-regime      { background: rgba(224,85,85,0.12);  color: var(--regime);      border: 1px solid rgba(224,85,85,0.25); }
+/* ── BTN ── */
+.btn{border-radius:4px;padding:4px 8px;font-size:9px;letter-spacing:.5px;border:1px solid;transition:all 0.15s;}
+.btn-watch{background:transparent;border-color:#2a2a45;color:var(--text2);}
+.btn-watch:hover{border-color:var(--yellow);color:var(--yellow);}
+.btn-watch.active{border-color:var(--yellow);color:var(--yellow);background:#f5c84210;}
+.btn-ask{background:transparent;border-color:#1e3a5f;color:var(--blue);}
+.btn-ask:hover{background:#3d9eff18;border-color:var(--blue);}
+.btn-sm{padding:3px 7px;font-size:8px;}
 
-.dir-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
-.dir-bullish { color: var(--green); background: var(--green-lo); }
-.dir-bearish { color: var(--red);   background: var(--red-lo); }
-.dir-neutral { color: var(--text2); background: var(--bg4); }
+/* ── PILL ── */
+.pill{border:1px solid var(--border2);border-radius:10px;padding:2px 8px;font-size:8px;letter-spacing:.5px;cursor:pointer;white-space:nowrap;background:transparent;color:var(--text3);transition:all 0.12s;}
+.pill.active{background:var(--bg3);color:var(--text);}
+.pill:hover:not(.active){color:var(--text2);}
 
-.att-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
-.att-watch    { color: var(--text2); background: var(--bg4); }
-.att-focus    { color: var(--amber); background: var(--amber-lo); }
-.att-actioned { color: var(--green); background: var(--green-lo); }
+/* ── PANEL ── */
+.detail-panel{animation:slidein 0.2s ease;}
+.section-label{font-size:7px;letter-spacing:2px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;}
 
-/* ── Catalyst list ── */
-.cat-item { padding: 11px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; position: relative; }
-.cat-item:hover { background: var(--bg3); }
-.cat-item.sel { background: var(--bg3); }
-.cat-item.sel::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
-.cat-name { font-size: 12px; color: var(--text); line-height: 1.4; margin-bottom: 7px; font-weight: 450; }
-.cat-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.conf-track { height: 2px; background: var(--border); border-radius: 1px; margin-top: 7px; }
-.conf-fill { height: 2px; border-radius: 1px; transition: width 0.3s; }
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:#000000cc;z-index:600;display:flex;align-items:center;justify-content:center;padding:12px;}
+.modal-box{background:var(--bg1);border:1px solid var(--border2);border-radius:8px;max-height:92vh;overflow-y:auto;}
 
-/* ── Detail panel ── */
-.detail-title { font-size: 17px; font-weight: 600; color: var(--text); line-height: 1.4; margin-bottom: 14px; }
-.detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
-.kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
-.kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; }
-.kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text3); margin-bottom: 6px; }
-.kpi-value { font-size: 22px; font-weight: 700; font-family: var(--mono); }
-.kpi-sub { font-size: 10px; color: var(--text2); margin-top: 4px; }
+/* ── INPUT ── */
+.input-dark{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:6px 9px;color:var(--text);font-size:11px;font-family:inherit;width:100%;}
+.input-dark::placeholder{color:var(--text3);}
+.input-dark:focus{border-color:var(--blue);}
 
-.section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin-bottom: 8px; font-weight: 600; }
-.section-block { margin-bottom: 20px; }
+/* ── STAT BOX ── */
+.stat-box{background:var(--bg2);border-radius:4px;padding:6px 8px;text-align:center;}
+.stat-box .label{font-size:6px;color:var(--text3);letter-spacing:1.5px;margin-bottom:2px;}
+.stat-box .value{font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace;}
 
-.sig-row { padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); margin-bottom: 6px; border-left: 2px solid var(--border2); }
-.sig-row:last-child { margin-bottom: 0; }
-.sig-source { font-size: 10px; color: var(--accent); font-family: var(--mono); text-transform: uppercase; margin-bottom: 4px; }
-.sig-text { font-size: 12px; color: var(--text2); line-height: 1.5; }
-
-.att-btn-row { display: flex; gap: 6px; }
-.att-btn { padding: 6px 14px; border-radius: var(--r); font-size: 11px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text2); font-family: var(--font); transition: all 0.15s; }
-.att-btn:hover { border-color: var(--border2); color: var(--text); }
-.att-btn.active-watch    { border-color: var(--text2);  color: var(--text); }
-.att-btn.active-focus    { border-color: var(--amber);  color: var(--amber);  background: var(--amber-lo); }
-.att-btn.active-actioned { border-color: var(--green);  color: var(--green);  background: var(--green-lo); }
-
-.conf-meter { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 6px 0; }
-.conf-fill-lg { height: 6px; border-radius: 3px; transition: width 0.4s; }
-.tag { display: inline-flex; padding: 2px 7px; background: var(--bg4); border: 1px solid var(--border); border-radius: 3px; font-size: 10px; color: var(--text3); margin: 2px; font-family: var(--mono); }
-
-/* ── Sebastian ── */
-.seb-shell { display: flex; flex-direction: column; height: calc(100vh - 44px); background: var(--bg2); }
-.seb-header { padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.seb-engine-label { font-size: 10px; font-family: var(--mono); color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
-.seb-title { font-size: 15px; font-weight: 600; }
-.seb-sub { font-size: 11px; color: var(--text2); margin-top: 3px; }
-.seb-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-.seb-block { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; }
-.seb-block-label { font-size: 10px; font-family: var(--mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
-.seb-block-text { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-wrap; }
-.seb-user-block { background: var(--bg4); border: 1px solid var(--border2); border-radius: var(--r); padding: 10px 14px; }
-.seb-user-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; margin-bottom: 4px; }
-.seb-user-text { font-size: 13px; color: var(--text); }
-.seb-input-area { padding: 14px 20px; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; gap: 8px; align-items: flex-end; }
-.seb-textarea { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; color: var(--text); font-family: var(--font); font-size: 13px; outline: none; resize: none; min-height: 40px; max-height: 120px; }
-.seb-textarea:focus { border-color: var(--accent); }
-.seb-shortcuts { display: flex; gap: 6px; padding: 0 20px 10px; flex-wrap: wrap; flex-shrink: 0; }
-.shortcut-btn { padding: 4px 10px; background: var(--bg4); border: 1px solid var(--border); border-radius: 20px; font-size: 11px; color: var(--text2); cursor: pointer; font-family: var(--font); transition: all 0.12s; }
-.shortcut-btn:hover { border-color: var(--border2); color: var(--text); }
-.loading-pulse { opacity: 0.5; animation: pulse 1.4s ease-in-out infinite; }
-@keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.9; } }
-
-/* ── Assets ── */
-.assets-filter { display: flex; gap: 6px; margin-bottom: 16px; }
-.assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-.asset-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
-.asset-card:hover { border-color: var(--border2); transform: translateY(-1px); }
-.asset-card.focus-on { border-color: var(--amber); }
-.asset-card.watch-on { border-color: var(--border2); }
-.asset-card.actioned-on { border-color: var(--green); }
-.asset-ticker { font-size: 15px; font-weight: 700; margin-bottom: 2px; font-family: var(--mono); }
-.asset-sector { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
-.asset-conf-num { font-size: 24px; font-weight: 700; font-family: var(--mono); }
-.no-signal { font-size: 11px; color: var(--text3); margin-top: 8px; }
-
-/* ── Missions ── */
-.mission-type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
-.mtype-btn { padding: 12px 8px; border: 1px solid var(--border); border-radius: var(--r); background: transparent; color: var(--text2); cursor: pointer; font-family: var(--font); font-size: 12px; text-align: center; transition: all 0.12s; }
-.mtype-btn:hover { border-color: var(--border2); }
-.mtype-btn.sel { border-color: var(--accent); color: var(--text); background: var(--accent-lo); }
-.mtype-icon { font-size: 18px; margin-bottom: 5px; }
-.mission-item { display: flex; align-items: flex-start; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.mission-item:last-child { border-bottom: none; }
-.mission-target { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
-.mission-desc { font-size: 11px; color: var(--text2); }
-.prio-badge { padding: 2px 7px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
-.prio-normal   { color: var(--accent); background: var(--accent-lo); }
-.prio-high     { color: var(--amber);  background: var(--amber-lo); }
-.prio-critical { color: var(--red);    background: var(--red-lo); }
-
-/* ── Auth ── */
-.auth-wrap { display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--bg); }
-.auth-box { width: 380px; }
-.auth-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
-.auth-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 28px; }
-.auth-heading { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-.auth-sub { font-size: 12px; color: var(--text2); margin-bottom: 24px; }
-.field { margin-bottom: 14px; }
-.field label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
-.field input { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 12px; color: var(--text); font-family: var(--font); font-size: 13px; outline: none; transition: border-color 0.15s; }
-.field input:focus { border-color: var(--accent); }
-.auth-link { font-size: 12px; color: var(--text2); text-align: center; margin-top: 16px; }
-.auth-link span { color: var(--accent); cursor: pointer; }
-.err-box { background: var(--red-lo); border: 1px solid rgba(224,85,85,0.25); border-radius: var(--r); padding: 8px 12px; font-size: 11px; color: var(--red); margin-bottom: 14px; }
-
-/* ── Cards ── */
-.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); }
-.card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-.card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); }
-.card-body { padding: 16px; }
-
-/* ── Chain modal ── */
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(2px); }
-.modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r); padding: 24px; width: 440px; max-width: 95vw; }
-.modal-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
-.chain-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 11px; border-radius: var(--r); margin-bottom: 3px; background: var(--bg3); font-size: 12px; }
-.chain-ok   { color: var(--green); font-size: 11px; font-family: var(--mono); }
-.chain-warn { color: var(--amber); font-size: 11px; font-family: var(--mono); }
-.chain-err  { color: var(--red);   font-size: 11px; font-family: var(--mono); }
-
-/* ── Empty states ── */
-.empty { text-align: center; padding: 48px 20px; color: var(--text3); }
-.empty h3 { font-size: 14px; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
-.empty p  { font-size: 12px; line-height: 1.6; }
-
-/* ── Tooltips ── */
-[data-tip] { position: relative; }
-[data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--bg4); border: 1px solid var(--border2); border-radius: var(--r); padding: 5px 9px; font-size: 11px; color: var(--text); z-index: 50; pointer-events: none; margin-bottom: 6px; }
+/* ── SIGNAL ROW ── */
+.signal-row{padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start;}
+.signal-row:last-child{border-bottom:none;}
+.bot-tag{font-size:7px;letter-spacing:1px;border:1px solid;border-radius:3px;padding:1px 4px;white-space:nowrap;flex-shrink:0;}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback, useRef, useMemo } = React;
+const{useState,useEffect,useCallback,useRef,useMemo}=React;
 
-/* ── API ── */
-const BASE = '';
-let _token = localStorage.getItem('mb_token') || '';
+// ─────────────────────────────────────────────────────────────
+//  API
+// ─────────────────────────────────────────────────────────────
+const API="";
+const api=async(path,opts={})=>{
+  const token=localStorage.getItem("mb_token");
+  const headers={"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})};
+  const res=await fetch(API+path,{headers,...opts});
+  const j=await res.json();
+  if(!res.ok)throw new Error(j.detail||"Request failed");
+  return j;
+};
+async function fetchLivePrices(tickers){
+  try{
+    const chunks=[];for(let i=0;i<tickers.length;i+=40)chunks.push(tickers.slice(i,i+40));
+    const results={};
+    for(const chunk of chunks){const j=await api(`/api/prices?symbols=${chunk.join(",")}`);Object.assign(results,j.data||{});}
+    return Object.keys(results).length?results:null;
+  }catch{return null;}
+}
+async function fetchFxRates(){
+  try{
+    const pairs="GBPUSD=X,GBPEUR=X,GBPJPY=X,GBPCAD=X,GBPAUD=X,GBPCHF=X";
+    const j=await api(`/api/prices?symbols=${pairs}`);
+    if(!j.data)return null;
+    const rates={GBP:1.0};
+    const map={"GBPUSD=X":"USD","GBPEUR=X":"EUR","GBPJPY=X":"JPY","GBPCAD=X":"CAD","GBPAUD=X":"AUD","GBPCHF=X":"CHF"};
+    Object.entries(map).forEach(([sym,code])=>{const d=j.data[sym];if(d?.price)rates[code]=parseFloat(d.price);});
+    return rates;
+  }catch{return null;}
+}
 
-async function api(path, opts = {}) {
-  const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+// ─────────────────────────────────────────────────────────────
+//  STATIC DATA
+// ─────────────────────────────────────────────────────────────
+const CURRENCIES=[
+  {code:"GBP",symbol:"£",flag:"🇬🇧",fb:1.00},
+  {code:"USD",symbol:"$",flag:"🇺🇸",fb:1.27},
+  {code:"EUR",symbol:"€",flag:"🇪🇺",fb:1.17},
+  {code:"JPY",symbol:"¥",flag:"🇯🇵",fb:192.5},
+  {code:"CAD",symbol:"C$",flag:"🇨🇦",fb:1.72},
+  {code:"AUD",symbol:"A$",flag:"🇦🇺",fb:1.95},
+  {code:"CHF",symbol:"Fr",flag:"🇨🇭",fb:1.13},
+];
+
+const ASSETS=[
+  {ticker:"ZIM",name:"ZIM Shipping",sector:"Shipping",sub:"Container",cap:"Mid"},
+  {ticker:"MATX",name:"Matson Inc",sector:"Shipping",sub:"Container",cap:"Mid"},
+  {ticker:"DAC",name:"Danaos Corp",sector:"Shipping",sub:"Container",cap:"Small"},
+  {ticker:"LMT",name:"Lockheed Martin",sector:"Defence",sub:"Aerospace",cap:"Large"},
+  {ticker:"RTX",name:"Raytheon Tech",sector:"Defence",sub:"Missiles",cap:"Large"},
+  {ticker:"NOC",name:"Northrop Grumman",sector:"Defence",sub:"Systems",cap:"Large"},
+  {ticker:"BA",name:"Boeing",sector:"Defence",sub:"Aircraft",cap:"Large"},
+  {ticker:"BAE.L",name:"BAE Systems",sector:"Defence",sub:"Land Systems",cap:"Large"},
+  {ticker:"QQE.L",name:"Qinetiq Group",sector:"Defence",sub:"R&D",cap:"Mid"},
+  {ticker:"XOM",name:"ExxonMobil",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"BP",name:"BP plc",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"CVX",name:"Chevron",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"TTE",name:"TotalEnergies",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"BW",name:"BW LPG",sector:"Energy",sub:"LNG Shipping",cap:"Small"},
+  {ticker:"MRO",name:"Marathon Oil",sector:"Energy",sub:"Upstream",cap:"Mid"},
+  {ticker:"MU",name:"Micron Tech",sector:"Technology",sub:"Memory",cap:"Large"},
+  {ticker:"NVDA",name:"NVIDIA",sector:"Technology",sub:"Semiconductors",cap:"Large"},
+  {ticker:"AMD",name:"AMD",sector:"Technology",sub:"Semiconductors",cap:"Large"},
+  {ticker:"INTC",name:"Intel",sector:"Technology",sub:"Semiconductors",cap:"Large"},
+  {ticker:"CRWD",name:"CrowdStrike",sector:"Technology",sub:"Cybersecurity",cap:"Large"},
+  {ticker:"PANW",name:"Palo Alto",sector:"Technology",sub:"Cybersecurity",cap:"Large"},
+  {ticker:"MSFT",name:"Microsoft",sector:"Technology",sub:"Software",cap:"Large"},
+  {ticker:"GOOGL",name:"Alphabet",sector:"Technology",sub:"Software",cap:"Large"},
+  {ticker:"GLD",name:"SPDR Gold ETF",sector:"Metals",sub:"Gold",cap:"Large"},
+  {ticker:"GFI",name:"Gold Fields",sector:"Metals",sub:"Gold Miners",cap:"Mid"},
+  {ticker:"FCX",name:"Freeport-McMoRan",sector:"Metals",sub:"Copper",cap:"Large"},
+  {ticker:"NUE",name:"Nucor Steel",sector:"Metals",sub:"Steel",cap:"Large"},
+  {ticker:"LAC",name:"Lithium Americas",sector:"Minerals",sub:"Lithium",cap:"Small"},
+  {ticker:"ALB",name:"Albemarle",sector:"Minerals",sub:"Lithium",cap:"Mid"},
+  {ticker:"UEC",name:"Uranium Energy",sector:"Minerals",sub:"Uranium",cap:"Small"},
+  {ticker:"BHP",name:"BHP Group",sector:"Minerals",sub:"Mining",cap:"Large"},
+  {ticker:"RIO",name:"Rio Tinto",sector:"Minerals",sub:"Mining",cap:"Large"},
+  {ticker:"VALE",name:"Vale SA",sector:"Minerals",sub:"Iron Ore",cap:"Large"},
+  {ticker:"UNH",name:"UnitedHealth",sector:"Insurance",sub:"Health",cap:"Large"},
+  {ticker:"AIG",name:"AIG",sector:"Insurance",sub:"P&C",cap:"Large"},
+  {ticker:"MKL",name:"Markel Corp",sector:"Insurance",sub:"Specialty",cap:"Mid"},
+  {ticker:"JPM",name:"JPMorgan Chase",sector:"Finance",sub:"Banking",cap:"Large"},
+  {ticker:"GS",name:"Goldman Sachs",sector:"Finance",sub:"Banking",cap:"Large"},
+  {ticker:"V",name:"Visa",sector:"Finance",sub:"Payments",cap:"Large"},
+  {ticker:"BTC-USD",name:"Bitcoin",sector:"Crypto",sub:"Layer 1",cap:"Large"},
+  {ticker:"ETH-USD",name:"Ethereum",sector:"Crypto",sub:"Layer 1",cap:"Large"},
+  {ticker:"COIN",name:"Coinbase",sector:"Crypto",sub:"Exchange",cap:"Mid"},
+  {ticker:"AMZN",name:"Amazon",sector:"Logistics",sub:"E-Commerce",cap:"Large"},
+  {ticker:"UPS",name:"UPS",sector:"Logistics",sub:"Delivery",cap:"Large"},
+  {ticker:"FDX",name:"FedEx",sector:"Logistics",sub:"Delivery",cap:"Large"},
+  {ticker:"TSLA",name:"Tesla",sector:"Consumer",sub:"EV",cap:"Large"},
+  {ticker:"NKE",name:"Nike",sector:"Consumer",sub:"Apparel",cap:"Large"},
+  {ticker:"EURUSD=X",name:"EUR/USD",sector:"Forex",sub:"Major",cap:"Large"},
+  {ticker:"GBPUSD=X",name:"GBP/USD",sector:"Forex",sub:"Major",cap:"Large"},
+  {ticker:"USDJPY=X",name:"USD/JPY",sector:"Forex",sub:"Major",cap:"Large"},
+];
+
+const WAVE_STATES=["spark","confirmed","escalation","structural","regime"];
+const WAVE_CFG={
+  spark:{label:"SPARK",color:"#555",bg:"#55555515",next:"confirmed"},
+  confirmed:{label:"CONFIRMED",color:"#3d9eff",bg:"#3d9eff15",next:"escalation"},
+  escalation:{label:"ESCALATION",color:"#f5c842",bg:"#f5c84215",next:"structural"},
+  structural:{label:"STRUCTURAL",color:"#ff7a3d",bg:"#ff7a3d15",next:"regime"},
+  regime:{label:"REGIME",color:"#ff4d6a",bg:"#ff4d6a15",next:null},
+};
+
+const BOTS=["GEO","MACRO","EARNINGS","FUNDAMENTALS","NEWS","TECHNICAL","INSIDER","ANALYST","HIRING"];
+const BOT_COLORS={
+  GEO:"#a78bfa",MACRO:"#3d9eff",EARNINGS:"#00d68f",FUNDAMENTALS:"#f5c842",
+  NEWS:"#ff7a3d",TECHNICAL:"#00d68f",INSIDER:"#ff4d6a",ANALYST:"#3d9eff",HIRING:"#a78bfa"
+};
+
+const SECTORS=["All",...new Set(ASSETS.map(a=>a.sector))];
+const CAPS_ORDER=["All","Small","Mid","Large"];
+const CAP_COLORS={Small:"#f5c842",Mid:"#00d68f",Large:"#3d9eff"};
+
+// ─────────────────────────────────────────────────────────────
+//  SIGNAL GENERATOR  (deterministic mock until real bot data)
+// ─────────────────────────────────────────────────────────────
+function sr(seed,min,max){const x=Math.sin(seed)*10000;return min+(x-Math.floor(x))*(max-min);}
+
+const SIGNAL_TEMPLATES={
+  GEO:[
+    "Red Sea diversions active — vessels rerouting via Cape of Good Hope",
+    "Strait of Hormuz tension elevated — Iran naval activity reported",
+    "Ukraine conflict supply chain disruption affecting European routes",
+    "NATO Article 5 discussions ongoing — defence spending pledges increasing",
+    "Sanctions package expansion under review — commodity flows at risk",
+    "Middle East ceasefire negotiations stalled — risk premium persisting",
+  ],
+  MACRO:[
+    "Fed signals rates higher for longer — dollar strength persisting",
+    "PMI contraction deepening in Eurozone — recessionary risk rising",
+    "China stimulus package approved — commodity demand recovery signal",
+    "Inflation reacceleration risk flagged — energy component key driver",
+    "Yield curve inversion deepening — historical recession indicator",
+    "ECB rate decision imminent — currency volatility window open",
+  ],
+  EARNINGS:[
+    "Beat consensus by +12% on revenue — guidance raised for FY",
+    "Missed EPS by $0.08 — margin compression cited by management",
+    "Record quarterly revenue announced — growth accelerating YoY",
+    "Earnings call flagged 'challenging macro environment' — caution",
+    "Inventory writedown disclosed — Q4 outlook revised lower",
+    "Strong free cash flow generation — buyback programme expanded",
+  ],
+  FUNDAMENTALS:[
+    "P/E at 5-year low vs sector peers — potential value entry",
+    "Debt/equity ratio deteriorating — balance sheet stress signal",
+    "Revenue growth accelerating 3 consecutive quarters",
+    "Net cash position strong — no dilution risk near term",
+    "Return on equity declining — efficiency concerns emerging",
+    "Book value discount wide — activist potential flagged",
+  ],
+  NEWS:[
+    "Regulatory investigation opened — headline risk elevated",
+    "Strategic acquisition rumour circulating — premium potential",
+    "Contract win announced — adds 8% to forward revenue estimate",
+    "CEO departure sudden — uncertainty premium warranted",
+    "Product recall issued — reputational and financial cost risk",
+    "Partnership agreement with major player — validation signal",
+  ],
+  TECHNICAL:[
+    "Breaking 3-month resistance on 2.1x average volume",
+    "Golden cross forming — 50MA crossing above 200MA",
+    "RSI divergence bullish — momentum building below oversold",
+    "Head and shoulders pattern completing — downside target active",
+    "Support level defended — buying pressure confirmed at key level",
+    "Volume accumulation detected — institutional build-up pattern",
+  ],
+  INSIDER:[
+    "CEO purchased 85,000 shares at market — largest buy in 3 years",
+    "CFO sold 40% of holding post earnings — post-vest disposal",
+    "Three board members bought simultaneously — coordinated signal",
+    "Director selling on exercised options — routine, no signal",
+    "New institutional 13F filing — 5% position built quietly",
+    "Short interest declining sharply — squeeze potential building",
+  ],
+  ANALYST:[
+    "Upgraded to Buy at Goldman — target raised +28% to new high",
+    "Downgraded to Underperform at JPM — multiple contraction risk",
+    "Consensus target revised up across 6 brokers — alignment signal",
+    "Analyst initiation with Outperform — new coverage catalyst",
+    "Price target cut below current price — negative revisions cycle",
+    "Estimate raised ahead of earnings — whisper number elevated",
+  ],
+  HIRING:[
+    "Engineering headcount up 34% YoY — aggressive growth phase",
+    "Mass layoffs announced — cost restructuring, margin focus",
+    "Senior AI/ML roles posted aggressively — capability build signal",
+    "Hiring freeze extended — cash conservation priority",
+    "Operations roles spiking in new geography — expansion signal",
+    "R&D hiring surge — next-cycle product development accelerating",
+  ],
+};
+
+const SEBASTIAN_PROMPTS={
+  bullish:{
+    spark:"Something's starting here — early signals are pointing up but it's not confirmed yet. Worth keeping an eye on.",
+    confirmed:"This one's building. Multiple sources are agreeing, which is a good sign. Want me to walk you through what's driving it?",
+    escalation:"The momentum here is real. Several intelligence sources are aligned and the price action is responding. This is the kind of setup worth studying.",
+    structural:"This has moved beyond a trade idea — there's a structural shift happening. The kind of move that lasts weeks, not hours. Want the full picture?",
+    regime:"This is a regime-level catalyst. The kind of thing that reshapes an entire sector. I'd want you to understand exactly what's happening before acting.",
+  },
+  bearish:{
+    spark:"Early warning signs here — not panic territory but something to monitor.",
+    confirmed:"Confirmed negative signals across multiple sources. Worth understanding why before the market fully prices this in.",
+    escalation:"Pressure is building. The short side is getting crowded for a reason. Want me to break down the bear case?",
+    structural:"Structural weakness confirmed. This isn't a dip — this is a trend change. Let me show you what the bots are seeing.",
+    regime:"Regime-level deterioration. Multiple systemic signals aligned. Protective positioning worth considering.",
+  },
+  neutral:{
+    spark:"Something stirred but no clear direction yet. Monitoring.",
+    confirmed:"Mixed signals — some bots bullish, some cautious. Classic uncertainty setup.",
+    escalation:"Elevated activity but no strong bias. The market's figuring this out in real time.",
+    structural:"Complex picture. Multiple valid narratives competing. Let's look at the evidence together.",
+    regime:"High-intensity regime with no clear directional bias. Volatility play, not directional.",
+  },
+};
+
+function generateIntelligence(asset, sessionKey){
+  const s=asset.ticker.split("").reduce((a,c)=>a+c.charCodeAt(0),0)+sessionKey;
+  const r=(o=0)=>sr(s+o,-1,1);
+  const rn=(min,max,o=0)=>sr(s+o,min,max);
+
+  // Determine which bots fired
+  const botCount=Math.floor(rn(1,BOTS.length,1));
+  const shuffled=[...BOTS].sort((_,__)=>sr(s+__.charCodeAt?__.charCodeAt(0):0,-1,1));
+  const activeBots=shuffled.slice(0,Math.min(botCount,5));
+
+  // Signal packets per active bot
+  const signals=activeBots.map((bot,i)=>{
+    const templates=SIGNAL_TEMPLATES[bot];
+    const idx=Math.floor(rn(0,templates.length,i*7));
+    const strength=parseFloat(rn(0.3,0.95,i*13).toFixed(2));
+    const bullish=r(i*19)>-0.1;
+    return{bot,text:templates[idx]||templates[0],strength,bullish};
   });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e.detail || `${res.status} ${res.statusText}`);
-  }
-  return res.json();
+
+  // Confidence score (0-100)
+  const baseConf=rn(20,92,99);
+  const verificationBonus=activeBots.length>=3?12:activeBots.length>=2?6:0;
+  const confidence=Math.min(99,Math.round(baseConf+verificationBonus));
+
+  // Intensity (signal alignment strength)
+  const bullishSignals=signals.filter(s=>s.bullish).length;
+  const alignment=bullishSignals/Math.max(signals.length,1);
+  const intensity=Math.round((alignment*0.6+rn(0.1,0.5,88)*0.4)*100);
+
+  // Wave state (evidence-gated)
+  let wave="spark";
+  if(confidence>=42&&activeBots.length>=2)wave="confirmed";
+  if(confidence>=58&&activeBots.length>=2)wave="escalation";
+  if(confidence>=72&&activeBots.length>=3)wave="structural";
+  if(confidence>=85&&activeBots.length>=4)wave="regime";
+
+  // Override with some forced variety for demo
+  const forceWave=["spark","spark","confirmed","confirmed","confirmed","escalation","escalation","structural","regime"];
+  wave=forceWave[Math.floor(rn(0,forceWave.length,77))];
+
+  // Bias
+  const biasScore=alignment*100-(100-intensity)*0.3;
+  const bias=biasScore>58?"bullish":biasScore<40?"bearish":"neutral";
+
+  // Price range by sector
+  const priceRanges={
+    Shipping:[10,80],Defence:[200,600],Energy:[20,130],Technology:[15,900],
+    Metals:[15,250],Minerals:[2,80],Insurance:[50,600],Finance:[50,600],
+    Crypto:[0.5,100000],Logistics:[80,300],Consumer:[50,500],Forex:[0.6,200],
+  };
+  const[pMin,pMax]=priceRanges[asset.sector]||[10,500];
+  const price=parseFloat(rn(pMin,pMax,55).toFixed(asset.sector==="Crypto"&&pMax>1000?0:2));
+  const changePct=parseFloat(rn(-8,8,66).toFixed(2));
+
+  // Perplexity verdict (simulated)
+  const verdicts=["supported","supported","mixed","weak","contradicted"];
+  const verdict=verdicts[Math.floor(rn(0,verdicts.length,101))];
+  const verScore=verdict==="supported"?0.7:verdict==="mixed"?0.2:verdict==="weak"?-0.1:-0.5;
+
+  // Sebastian prompt
+  const sbPrompt=SEBASTIAN_PROMPTS[bias]?.[wave]||SEBASTIAN_PROMPTS.neutral.spark;
+
+  return{
+    confidence,intensity,wave,bias,signals,activeBots,
+    price,changePct,livePrice:false,marketState:"CLOSED",
+    perplexity:{verdict,score:verScore,
+      summary:verdict==="supported"?"Independent verification confirms the thesis across multiple sources.":
+               verdict==="mixed"?"Mixed signals from external verification — proceed with caution.":
+               verdict==="weak"?"Weak external support — signals may be noise.":
+               "External data contradicts internal signals — risk elevated."},
+    fundamentals:{pe:parseFloat(rn(3,45,201).toFixed(1)),debtEquity:parseFloat(rn(0,3,202).toFixed(2)),revGrowth:parseFloat(rn(-20,80,203).toFixed(1))},
+    technical:{rsi:parseFloat(rn(18,82,204).toFixed(0)),volume:parseFloat(rn(0.4,4,205).toFixed(1)),macd:parseFloat(rn(-1,1,206).toFixed(2))},
+    sbPrompt,
+  };
 }
 
-/* ── Helpers ── */
-function confColor(c) {
-  if (c >= 75) return 'var(--green)';
-  if (c >= 50) return 'var(--amber)';
-  if (c >= 25) return 'var(--accent)';
-  return 'var(--red)';
+function mergeLive(intel,liveData,ticker){
+  const live=liveData?.[ticker];
+  if(!live?.price)return intel;
+  const realPrice=live.currency==="GBX"?live.price/100:live.price;
+  return{...intel,price:parseFloat(realPrice.toFixed(realPrice>100?2:4)),changePct:live.change_pct||0,livePrice:true,marketState:live.market_state||"CLOSED",currency:live.currency||"USD"};
 }
 
-function timeAgo(ts) {
-  const d = Date.now() / 1000 - ts;
-  if (d < 60)    return `${Math.round(d)}s ago`;
-  if (d < 3600)  return `${Math.round(d/60)}m ago`;
-  if (d < 86400) return `${Math.round(d/3600)}h ago`;
-  return `${Math.round(d/86400)}d ago`;
+// ─────────────────────────────────────────────────────────────
+//  SMALL HELPERS
+// ─────────────────────────────────────────────────────────────
+const fmtPct=(n,d=1)=>`${n>0?"+":""}${parseFloat(n||0).toFixed(d)}%`;
+const pCol=v=>v>0?"#00d68f":v<0?"#ff4d6a":"#6a6a9a";
+const uid=()=>Math.random().toString(36).slice(2,9);
+
+function WaveBadge({wave}){
+  const c=WAVE_CFG[wave]||WAVE_CFG.spark;
+  return(
+    <span style={{fontSize:7,letterSpacing:.8,border:`1px solid`,borderColor:c.color+"44",color:c.color,borderRadius:3,padding:"1px 5px",whiteSpace:"nowrap"}}>
+      {c.label}
+    </span>
+  );
 }
 
-function WaveBadge({ wave }) {
-  return <span className={`wave-badge wave-${wave||'spark'}`}>{wave||'spark'}</span>;
-}
-function DirBadge({ dir }) {
-  const arrow = dir==='bullish' ? '↑' : dir==='bearish' ? '↓' : '→';
-  return <span className={`dir-badge dir-${dir||'neutral'}`}>{arrow} {dir||'neutral'}</span>;
-}
-function AttBadge({ att }) {
-  const label = att==='actioned' ? '✓ Actioned' : att==='focus' ? '◉ Focus' : '◎ Watch';
-  return <span className={`att-badge att-${att||'watch'}`}>{label}</span>;
+function BiasIcon({bias}){
+  if(bias==="bullish")return<span style={{color:"#00d68f",fontSize:8}}>▲ BULL</span>;
+  if(bias==="bearish")return<span style={{color:"#ff4d6a",fontSize:8}}>▼ BEAR</span>;
+  return<span style={{color:"#6a6a9a",fontSize:8}}>◆ NEUTRAL</span>;
 }
 
-/* ═══════════════════════════════════════════════
-   AUTH
-═══════════════════════════════════════════════ */
-function AuthScreen({ onAuth }) {
-  const [mode, setMode]     = useState('login');
-  const [name, setName]     = useState('');
-  const [email, setEmail]   = useState('');
-  const [pw, setPw]         = useState('');
-  const [err, setErr]       = useState('');
-  const [busy, setBusy]     = useState(false);
+function MiniBar({value,color,max=100}){
+  const pct=Math.max(0,Math.min(100,(value/max)*100));
+  return(
+    <div className="bar-track" style={{width:"100%"}}>
+      <div className="bar-fill" style={{width:`${pct}%`,background:color}}/>
+    </div>
+  );
+}
 
-  async function submit() {
-    setErr(''); setBusy(true);
-    try {
-      const body = mode==='login' ? { email, password: pw } : { name, email, password: pw };
-      const data = await api(mode==='login' ? '/api/auth/login' : '/api/auth/register', { method:'POST', body });
-      _token = data.token;
-      localStorage.setItem('mb_token', _token);
-      onAuth(data.user);
-    } catch(e) { setErr(e.message); }
-    setBusy(false);
-  }
+function StatBox({label,value,color="#c8cce8",sub}){
+  return(
+    <div className="stat-box">
+      <div className="label">{label}</div>
+      <div className="value" style={{color}}>{value}</div>
+      {sub&&<div style={{fontSize:7,color:"#3a3a60",marginTop:1}}>{sub}</div>}
+    </div>
+  );
+}
 
-  return (
-    <div className="auth-wrap">
-      <div className="auth-box">
-        <div className="auth-logo">
-          <div className="logo-mark">M</div>
-          <span style={{ fontSize:15, fontWeight:700 }}>Market Brain</span>
+// ─────────────────────────────────────────────────────────────
+//  DETAIL PANEL  (right side when card selected)
+// ─────────────────────────────────────────────────────────────
+function DetailPanel({asset,intel,fmtMoney,onWatch,onAskSebastian,isWatching}){
+  const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
+  const vc={supported:"#00d68f",mixed:"#f5c842",weak:"#ff7a3d",contradicted:"#ff4d6a"}[intel.perplexity.verdict]||"#6a6a9a";
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[intel.bias];
+
+  return(
+    <div className="detail-panel" style={{height:"100%",overflowY:"auto",padding:"14px 12px",display:"flex",flexDirection:"column",gap:10}}>
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:"#e0e4ff",letterSpacing:.5}}>{asset.ticker}</div>
+          <div style={{fontSize:9,color:"#3a3a60",marginTop:1}}>{asset.name} · {asset.sector} · {asset.sub}</div>
+          <div style={{display:"flex",gap:5,marginTop:5,flexWrap:"wrap",alignItems:"center"}}>
+            <WaveBadge wave={intel.wave}/>
+            <BiasIcon bias={intel.bias}/>
+            {intel.livePrice&&<span style={{fontSize:7,color:"#00d68f"}}>● LIVE</span>}
+          </div>
         </div>
-        <div className="auth-card">
-          <div className="auth-heading">{mode==='login' ? 'Sign in' : 'Create account'}</div>
-          <div className="auth-sub">Intelligence terminal · Phase 1</div>
-          {err && <div className="err-box">{err}</div>}
-          {mode==='register' && (
-            <div className="field"><label>Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" /></div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"'IBM Plex Mono'",fontSize:17,fontWeight:600,color:"#e0e4ff"}}>{fmtMoney(intel.price)}</div>
+          <div style={{fontSize:10,color:pCol(intel.changePct),fontFamily:"monospace"}}>{fmtPct(intel.changePct)}</div>
+        </div>
+      </div>
+
+      {/* Confidence + Intensity */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"9px 10px",border:"1px solid var(--border)"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+              <span style={{fontSize:7,color:"#3a3a60",letterSpacing:1}}>CONFIDENCE</span>
+              <span style={{fontSize:10,color:"#e0e4ff",fontWeight:600}}>{intel.confidence}%</span>
+            </div>
+            <MiniBar value={intel.confidence} color={intel.confidence>=72?"#00d68f":intel.confidence>=55?"#f5c842":"#ff7a3d"}/>
+          </div>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+              <span style={{fontSize:7,color:"#3a3a60",letterSpacing:1}}>INTENSITY</span>
+              <span style={{fontSize:10,color:"#e0e4ff",fontWeight:600}}>{intel.intensity}%</span>
+            </div>
+            <MiniBar value={intel.intensity} color={biasColor}/>
+          </div>
+        </div>
+
+        {/* Wave progress */}
+        <div>
+          <div style={{fontSize:7,color:"#3a3a60",letterSpacing:1,marginBottom:5}}>WAVE PROGRESSION</div>
+          <div style={{display:"flex",gap:3,alignItems:"center"}}>
+            {WAVE_STATES.map((ws,i)=>{
+              const wc2=WAVE_CFG[ws];
+              const isActive=ws===intel.wave;
+              const isPast=WAVE_STATES.indexOf(intel.wave)>i;
+              return(
+                <React.Fragment key={ws}>
+                  <div style={{flex:1,textAlign:"center",padding:"3px 4px",borderRadius:3,background:isActive?wc2.bg:isPast?"#ffffff08":"transparent",border:`1px solid ${isActive?wc2.color:isPast?"#ffffff15":"var(--border)"}`,transition:"all 0.2s"}}>
+                    <div style={{fontSize:6,letterSpacing:.5,color:isActive?wc2.color:isPast?"#ffffff30":"#2e2e50",fontWeight:isActive?700:400}}>{wc2.label}</div>
+                  </div>
+                  {i<WAVE_STATES.length-1&&<div style={{width:6,height:1,background:isPast?"#ffffff20":"var(--border)",flexShrink:0}}/>}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Bot signals */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"9px 10px",border:"1px solid var(--border)"}}>
+        <div className="section-label">BOT INTELLIGENCE ({intel.signals.length} SOURCE{intel.signals.length!==1?"S":""})</div>
+        {intel.signals.map((sig,i)=>{
+          const bc=BOT_COLORS[sig.bot]||"#6a6a9a";
+          return(
+            <div key={i} className="signal-row">
+              <span className="bot-tag" style={{color:bc,borderColor:bc+"44"}}>{sig.bot}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:9,color:"#b0b4d0",lineHeight:1.5}}>{sig.text}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3}}>
+                  <div className="bar-track" style={{width:50,flexShrink:0}}>
+                    <div className="bar-fill" style={{width:`${sig.strength*100}%`,background:sig.bullish?"#00d68f":"#ff4d6a"}}/>
+                  </div>
+                  <span style={{fontSize:7,color:"#3a3a60"}}>{(sig.strength*100).toFixed(0)}% strength · {sig.bullish?"bullish":"bearish"}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {/* Inactive bots */}
+        <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+          {BOTS.filter(b=>!intel.activeBots.includes(b)).map(b=>(
+            <span key={b} style={{fontSize:7,color:"#2e2e50",border:"1px solid #111128",borderRadius:3,padding:"1px 4px"}}>{b}</span>
+          ))}
+          {BOTS.filter(b=>!intel.activeBots.includes(b)).length>0&&(
+            <span style={{fontSize:7,color:"#2e2e50"}}>bots inactive</span>
           )}
-          <div className="field"><label>Email</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@domain.com" /></div>
-          <div className="field">
-            <label>Password</label>
-            <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="••••••••" />
-          </div>
-          <button className="btn btn-primary" style={{width:'100%',marginTop:6}} onClick={submit} disabled={busy}>
-            {busy ? 'Loading...' : mode==='login' ? 'Sign in' : 'Create account'}
-          </button>
-          <div className="auth-link">
-            {mode==='login' ? <>No account? <span onClick={()=>setMode('register')}>Register</span></> : <>Have an account? <span onClick={()=>setMode('login')}>Sign in</span></>}
-          </div>
+        </div>
+      </div>
+
+      {/* Perplexity verification */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"9px 10px",border:`1px solid ${vc}22`}}>
+        <div className="section-label">PERPLEXITY VERIFICATION</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <span style={{fontSize:10,color:vc,fontWeight:600,letterSpacing:.5}}>{intel.perplexity.verdict.toUpperCase()}</span>
+          <span style={{fontSize:9,color:"#3a3a60"}}>score: {intel.perplexity.score>0?"+":""}{(intel.perplexity.score*100).toFixed(0)}</span>
+        </div>
+        <div style={{fontSize:9,color:"#7a7a9a",lineHeight:1.5}}>{intel.perplexity.summary}</div>
+      </div>
+
+      {/* Fundamentals + Technical */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+        <StatBox label="P/E" value={intel.fundamentals.pe} color={intel.fundamentals.pe<15?"#00d68f":intel.fundamentals.pe>40?"#ff4d6a":"#c8cce8"}/>
+        <StatBox label="DEBT/EQ" value={intel.fundamentals.debtEquity} color={intel.fundamentals.debtEquity<1?"#00d68f":intel.fundamentals.debtEquity>2?"#ff4d6a":"#c8cce8"}/>
+        <StatBox label="REV GRWTH" value={fmtPct(intel.fundamentals.revGrowth,0)} color={pCol(intel.fundamentals.revGrowth)}/>
+        <StatBox label="RSI" value={intel.technical.rsi} color={intel.technical.rsi<30?"#00d68f":intel.technical.rsi>70?"#ff4d6a":"#c8cce8"}/>
+        <StatBox label="VOL ×" value={`${intel.technical.volume}×`} color={intel.technical.volume>1.5?"#3d9eff":"#6a6a9a"}/>
+        <StatBox label="MACD" value={intel.technical.macd>0?"↑ POS":"↓ NEG"} color={intel.technical.macd>0?"#00d68f":"#ff4d6a"}/>
+      </div>
+
+      {/* Sebastian prompt */}
+      <div style={{background:wc.bg,border:`1px solid ${wc.color}33`,borderRadius:5,padding:"10px 11px"}}>
+        <div style={{fontSize:7,color:wc.color,letterSpacing:1.5,marginBottom:5}}>SEBASTIAN</div>
+        <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.6,fontStyle:"italic"}}>"{intel.sbPrompt}"</div>
+        <button
+          className="btn btn-ask"
+          style={{marginTop:8,width:"100%",padding:"6px 8px",fontSize:9}}
+          onClick={()=>onAskSebastian(asset,intel)}
+        >
+          Ask Sebastian about {asset.ticker} →
+        </button>
+      </div>
+
+      {/* Watch btn */}
+      <button
+        className={`btn btn-watch ${isWatching?"active":""}`}
+        style={{width:"100%",padding:"7px"}}
+        onClick={()=>onWatch(asset,intel)}
+      >
+        {isWatching?"★ WATCHING":"★ ADD TO WATCHLIST"}
+      </button>
+
+      <div style={{fontSize:7,color:"#1a1a30",textAlign:"center",paddingBottom:4}}>
+        Virtual intelligence only. Not financial advice.
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  INTELLIGENCE CARD  (compact)
+// ─────────────────────────────────────────────────────────────
+function IntelCard({asset,intel,selected,onSelect,fmtMoney,isWatching}){
+  const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[intel.bias];
+  const confColor=intel.confidence>=72?"#00d68f":intel.confidence>=55?"#f5c842":"#ff7a3d";
+
+  return(
+    <div
+      className={`intel-card card-enter${selected?" selected":""}`}
+      onClick={onSelect}
+    >
+      {/* accent bar = wave colour */}
+      <div className="accent-bar" style={{background:wc.color}}/>
+
+      {/* Row 1: ticker + live dot + wave */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+        <div style={{display:"flex",gap:4,alignItems:"center"}}>
+          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,color:"#e0e4ff",letterSpacing:.3}}>{asset.ticker}</span>
+          {intel.livePrice&&<span style={{fontSize:6,color:"#00d68f"}}>●</span>}
+        </div>
+        <WaveBadge wave={intel.wave}/>
+      </div>
+
+      {/* Row 2: name + sector */}
+      <div style={{fontSize:7,color:"#3a3a60",marginBottom:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{asset.name} · <span style={{color:"#2e2e55"}}>{asset.sector}</span></div>
+
+      {/* Row 3: price + change */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+        <span style={{fontFamily:"'IBM Plex Mono'",fontSize:11,fontWeight:600,color:"#d0d4f0"}}>{fmtMoney(intel.price)}</span>
+        <span style={{fontSize:9,color:pCol(intel.changePct),fontFamily:"monospace"}}>{fmtPct(intel.changePct)}</span>
+      </div>
+
+      {/* Row 4: confidence bar */}
+      <div style={{marginBottom:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+          <span style={{fontSize:6,color:"#2e2e50",letterSpacing:1}}>CONF</span>
+          <span style={{fontSize:7,color:confColor,fontWeight:600}}>{intel.confidence}%</span>
+        </div>
+        <MiniBar value={intel.confidence} color={confColor}/>
+      </div>
+
+      {/* Row 5: intensity bar */}
+      <div style={{marginBottom:5}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+          <span style={{fontSize:6,color:"#2e2e50",letterSpacing:1}}>INTENSITY</span>
+          <span style={{fontSize:7,color:biasColor,fontWeight:600}}>{intel.intensity}%</span>
+        </div>
+        <MiniBar value={intel.intensity} color={biasColor}/>
+      </div>
+
+      {/* Row 6: bias + cap + bot count */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <BiasIcon bias={intel.bias}/>
+        <div style={{display:"flex",gap:3,alignItems:"center"}}>
+          <span style={{fontSize:7,color:CAP_COLORS[asset.cap]||"#6a6a9a"}}>{asset.cap}</span>
+          <span style={{fontSize:7,color:"#2e2e50"}}>{intel.signals.length}B</span>
+          {isWatching&&<span style={{fontSize:7,color:"#f5c842"}}>★</span>}
         </div>
       </div>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════
-   CATALYST SIDEBAR
-═══════════════════════════════════════════════ */
-function CatalystSidebar({ cats, selected, onSelect, loading, onNew }) {
-  const [filter, setFilter] = useState('all');
-  const filtered = useMemo(() => {
-    if (filter==='all')      return cats;
-    if (filter==='focus')    return cats.filter(c=>c.attention==='focus');
-    if (filter==='actioned') return cats.filter(c=>c.attention==='actioned');
-    if (filter==='high')     return cats.filter(c=>c.confidence>=65);
-    return cats;
-  }, [cats, filter]);
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN MODAL
+// ─────────────────────────────────────────────────────────────
+function SebastianModal({asset,intel,fmtMoney,onClose}){
+  const[messages,setMessages]=useState([]);
+  const[input,setInput]=useState("");
+  const[loading,setLoading]=useState(false);
+  const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
+  const bottomRef=useRef(null);
 
-  return (
-    <div className="sidebar">
-      <div className="sidebar-header">
-        <div>
-          <div style={{fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.07em',color:'var(--text2)'}}>Catalysts</div>
-          <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{cats.length} active</div>
+  const context=`You are Sebastian, the user-facing analyst for Market Brain. You help traders of ALL levels understand market opportunities clearly.
+
+Current asset: ${asset.ticker} (${asset.name}) — ${asset.sector}/${asset.sub}
+Price: ${fmtMoney(intel.price)} | Change: ${fmtPct(intel.changePct)}
+Wave State: ${intel.wave.toUpperCase()} | Confidence: ${intel.confidence}% | Intensity: ${intel.intensity}%
+Bias: ${intel.bias.toUpperCase()}
+
+Active bot signals:
+${intel.signals.map(s=>`- ${s.bot}: "${s.text}" (${(s.strength*100).toFixed(0)}% strength, ${s.bullish?"bullish":"bearish"})`).join("\n")}
+
+Perplexity verification: ${intel.perplexity.verdict} (score: ${intel.perplexity.score})
+${intel.perplexity.summary}
+
+Fundamentals: P/E ${intel.fundamentals.pe} | Debt/Equity ${intel.fundamentals.debtEquity} | Revenue Growth ${fmtPct(intel.fundamentals.revGrowth,0)}
+Technical: RSI ${intel.technical.rsi} | Volume ${intel.technical.volume}x average | MACD ${intel.technical.macd>0?"positive":"negative"}
+
+IMPORTANT RULES:
+- Always explain things simply first, then give the technical depth
+- Never tell someone to buy or sell — explain the picture and let them decide
+- Keep responses concise and structured
+- Use plain language for the first sentence of every explanation
+- Always mention: this is not financial advice`;
+
+  useEffect(()=>{
+    // Auto first message
+    setMessages([{role:"assistant",content:`Hi! Let me break down what I'm seeing with **${asset.ticker}**.\n\n${intel.sbPrompt}\n\nHere's the quick picture:\n\n• **Wave state:** ${intel.wave.toUpperCase()} — ${WAVE_CFG[intel.wave]?.label}\n• **Confidence:** ${intel.confidence}% (${intel.confidence>=72?"strong":"developing"} signal)\n• **${intel.signals.length} intelligence sources** are active — ${intel.signals.filter(s=>s.bullish).length} pointing ${intel.bias}\n• **Perplexity check:** ${intel.perplexity.verdict} — ${intel.perplexity.summary}\n\nWhat would you like to understand better?`}]);
+  },[]);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
+
+  const send=async()=>{
+    if(!input.trim()||loading)return;
+    const userMsg={role:"user",content:input.trim()};
+    setMessages(p=>[...p,userMsg]);
+    setInput("");
+    setLoading(true);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          system:context,
+          messages:[...messages,userMsg].map(m=>({role:m.role,content:m.content})),
+        }),
+      });
+      const data=await res.json();
+      const reply=data.content?.find(b=>b.type==="text")?.text||"Sorry, I couldn't get a response right now.";
+      setMessages(p=>[...p,{role:"assistant",content:reply}]);
+    }catch{
+      setMessages(p=>[...p,{role:"assistant",content:"I'm having trouble connecting right now. The intelligence data above is still valid — check the signals panel for the full picture."}]);
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{width:"100%",maxWidth:580,height:"78vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{padding:"12px 14px",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed'",fontSize:14,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>ASK SEBASTIAN</div>
+            <div style={{fontSize:8,color:"#3a3a60",marginTop:1}}>{asset.ticker} · {intel.wave.toUpperCase()} · {intel.confidence}% confidence</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <WaveBadge wave={intel.wave}/>
+            <button onClick={onClose} style={{background:"none",border:"none",color:"#3a3a60",fontSize:16,lineHeight:1}}>×</button>
+          </div>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={onNew}>+ Mission</button>
-      </div>
-      <div style={{display:'flex',gap:4,padding:'8px 10px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
-        {['all','focus','actioned','high'].map(f=>(
-          <button key={f} onClick={()=>setFilter(f)}
-            style={{padding:'3px 8px',borderRadius:4,fontSize:10,fontFamily:'var(--mono)',border:'none',cursor:'pointer',
-              background: filter===f ? 'var(--bg4)' : 'transparent',
-              color: filter===f ? 'var(--text)' : 'var(--text3)'}}>
-            {f}
-          </button>
-        ))}
-      </div>
-      <div className="sidebar-scroll">
-        {loading && <div style={{padding:20,color:'var(--text3)',fontSize:12}}>Loading signals...</div>}
-        {!loading && filtered.length===0 && (
-          <div className="empty" style={{padding:32}}>
-            <h3>No catalysts</h3>
-            <p>Start a mission to begin tracking signals</p>
+
+        {/* Messages */}
+        <div style={{flex:1,overflowY:"auto",padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
+          {messages.map((m,i)=>(
+            <div key={i} style={{
+              alignSelf:m.role==="user"?"flex-end":"flex-start",
+              maxWidth:"85%",
+              background:m.role==="user"?"#1e3a5f":"var(--bg3)",
+              border:`1px solid ${m.role==="user"?"#3d9eff44":"var(--border)"}`,
+              borderRadius:6,padding:"8px 10px",
+              animation:"fadeUp 0.15s ease",
+            }}>
+              <div style={{fontSize:9,color:m.role==="user"?"#3d9eff":"#3a3a60",letterSpacing:1,marginBottom:3}}>{m.role==="user"?"YOU":"SEBASTIAN"}</div>
+              <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div>
+            </div>
+          ))}
+          {loading&&(
+            <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"8px 12px"}}>
+              <span style={{fontSize:10,color:"#3a3a60",animation:"pulse 1.2s infinite"}}>Sebastian is thinking...</span>
+            </div>
+          )}
+          <div ref={bottomRef}/>
+        </div>
+
+        {/* Suggested questions */}
+        {messages.length<2&&(
+          <div style={{padding:"0 14px 8px",display:"flex",flexWrap:"wrap",gap:4,flexShrink:0}}>
+            {[
+              `What's driving ${asset.ticker} right now?`,
+              "Is this a good entry point?",
+              "What's the biggest risk here?",
+              "Explain the wave state to me",
+              "What would change your view?",
+            ].map(q=>(
+              <button key={q} onClick={()=>setInput(q)} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:4,padding:"4px 8px",color:"#5a5a8a",fontSize:8,cursor:"pointer"}}>
+                {q}
+              </button>
+            ))}
           </div>
         )}
-        {filtered.map(cat => (
-          <div key={cat.id} className={`cat-item${selected?.id===cat.id?' sel':''}`} onClick={()=>onSelect(cat)}>
-            <div className="cat-name">{cat.title?.slice(0,90)}</div>
-            <div className="cat-row">
-              <WaveBadge wave={cat.wave} />
-              <DirBadge dir={cat.direction} />
-              {cat.attention==='focus'    && <span style={{fontSize:9,color:'var(--amber)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>FOCUS</span>}
-              {cat.attention==='actioned' && <span style={{fontSize:9,color:'var(--green)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>ACTIONED</span>}
-            </div>
-            <div className="conf-track">
-              <div className="conf-fill" style={{width:`${Math.max(2,cat.confidence)}%`,background:confColor(cat.confidence)}} />
-            </div>
-            <div style={{fontSize:10,color:'var(--text3)',marginTop:4,fontFamily:'var(--mono)'}}>
-              {cat.confidence}% · {(cat.assets||[]).slice(0,3).join(' ')||cat.sectors?.slice(0,2).join(' ')||'global'}
-            </div>
-          </div>
-        ))}
+
+        {/* Input */}
+        <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",display:"flex",gap:6,flexShrink:0,background:"var(--bg1)"}}>
+          <input
+            className="input-dark"
+            value={input}
+            onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&send()}
+            placeholder="Ask anything about this asset..."
+            style={{flex:1}}
+          />
+          <button
+            onClick={send}
+            disabled={!input.trim()||loading}
+            style={{background:input.trim()&&!loading?"#1e3a5f":"var(--bg3)",border:`1px solid ${input.trim()&&!loading?"#3d9eff44":"var(--border)"}`,borderRadius:4,padding:"6px 12px",color:input.trim()&&!loading?"#3d9eff":"#2e2e50",fontSize:9,flexShrink:0}}
+          >
+            SEND →
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════
-   CATALYST DETAIL
-═══════════════════════════════════════════════ */
-function CatalystDetail({ cat, onAttention, onVerify, onDismiss, onAskSebastian, verifying }) {
-  if (!cat) return (
-    <div className="empty" style={{paddingTop:80}}>
-      <h3>Select a catalyst</h3>
-      <p>Choose a catalyst from the sidebar to view full intelligence detail<br/>or start a mission to begin tracking an asset, sector, or theme</p>
-    </div>
-  );
+// ─────────────────────────────────────────────────────────────
+//  AUTH PAGES
+// ─────────────────────────────────────────────────────────────
+function AuthPage({onAuth}){
+  const[mode,setMode]=useState("home");
+  const[form,setForm]=useState({name:"",email:"",password:""});
+  const[error,setError]=useState("");
+  const[loading,setLoading]=useState(false);
+  const set=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
 
-  const sources = [...new Set((cat.signals||[]).map(s=>s.source))];
+  const submit=async()=>{
+    setError("");setLoading(true);
+    try{
+      const path=mode==="signup"?"/api/auth/register":"/api/auth/login";
+      const body=mode==="signup"?{name:form.name,email:form.email,password:form.password}:{email:form.email,password:form.password};
+      const j=await api(path,{method:"POST",body:JSON.stringify(body)});
+      localStorage.setItem("mb_token",j.token);
+      onAuth(j.user);
+    }catch(e){setError(e.message);}
+    setLoading(false);
+  };
 
-  return (
-    <div>
-      {/* Header */}
-      <div style={{marginBottom:20}}>
-        <div className="detail-title">{cat.title}</div>
-        <div className="detail-badges">
-          <WaveBadge wave={cat.wave} />
-          <DirBadge dir={cat.direction} />
-          <AttBadge att={cat.attention} />
-          {cat.verified && <span style={{fontSize:10,color:'var(--green)',border:'1px solid rgba(34,212,138,0.3)',padding:'2px 7px',borderRadius:3,fontFamily:'var(--mono)'}}>✓ VERIFIED</span>}
-          {cat.mission_id && <span style={{fontSize:10,color:'var(--purple)',border:'1px solid rgba(160,122,255,0.3)',padding:'2px 7px',borderRadius:3,fontFamily:'var(--mono)'}}>◎ MISSION</span>}
+  if(mode==="home")return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"var(--bg0)",overflow:"auto"}}>
+      <div style={{padding:"14px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:18,fontWeight:900,letterSpacing:3}}>MARKET <span style={{color:"var(--blue)"}}>BRAIN</span></div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={()=>setMode("login")} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:4,padding:"5px 12px",color:"var(--text2)",fontSize:9,letterSpacing:.5}}>LOG IN</button>
+          <button onClick={()=>setMode("signup")} style={{background:"#1e3a5f",border:"1px solid var(--blue)",borderRadius:4,padding:"5px 12px",color:"var(--blue)",fontSize:9,letterSpacing:.5}}>SIGN UP</button>
         </div>
       </div>
-
-      {/* KPIs */}
-      <div className="kpi-grid">
-        <div className="kpi">
-          <div className="kpi-label">Confidence</div>
-          <div className="kpi-value" style={{color:confColor(cat.confidence)}}>{cat.confidence}%</div>
-          <div className="conf-meter" style={{marginTop:8}}>
-            <div className="conf-fill-lg" style={{width:`${Math.max(2,cat.confidence)}%`,background:confColor(cat.confidence)}} />
-          </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"48px 20px",textAlign:"center"}}>
+        <div style={{fontSize:8,color:"var(--blue)",letterSpacing:3,marginBottom:12}}>● LIVE INTELLIGENCE · {ASSETS.length}+ ASSETS</div>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:52,fontWeight:900,lineHeight:1,marginBottom:14,letterSpacing:1}}>
+          <span style={{color:"#e0e4ff"}}>MARKET INTELLIGENCE</span><br/>
+          <span style={{background:"linear-gradient(90deg,var(--blue),var(--green))",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>AT EVERY LEVEL.</span>
         </div>
-        <div className="kpi">
-          <div className="kpi-label">Renewals</div>
-          <div className="kpi-value" style={{color:'var(--text)'}}>{cat.renewal_count}</div>
-          <div className="kpi-sub">signal updates</div>
+        <div style={{fontSize:11,color:"var(--text2)",maxWidth:440,lineHeight:1.8,marginBottom:36}}>
+          Nine research bots. One chief of staff. Real-time wave analysis. Market Brain turns market complexity into clear, actionable intelligence — for nervous beginners and experienced traders alike.
         </div>
-        <div className="kpi">
-          <div className="kpi-label">Sources</div>
-          <div className="kpi-value" style={{color:'var(--purple)'}}>{sources.length}</div>
-          <div className="kpi-sub">{sources.slice(0,2).join(', ')}</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",marginBottom:48}}>
+          <button onClick={()=>setMode("signup")} style={{background:"linear-gradient(135deg,var(--blue),#0065cc)",border:"none",borderRadius:6,padding:"12px 28px",color:"#fff",fontSize:10,letterSpacing:1.5,fontWeight:600,boxShadow:"0 0 30px #3d9eff33"}}>GET STARTED FREE →</button>
+          <button onClick={()=>setMode("login")} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:6,padding:"12px 28px",color:"var(--text2)",fontSize:10,letterSpacing:1.5}}>LOG IN</button>
         </div>
-      </div>
-
-      {/* Sebastian summary */}
-      {cat.persona_summary && (
-        <div className="section-block">
-          <div className="section-label">Sebastian Interpretation</div>
-          <div className="sig-row" style={{borderLeftColor:'var(--accent)'}}>
-            <div className="sig-source">Sebastian · Intelligence Engine</div>
-            <div className="sig-text">{cat.persona_summary}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Assets / Sectors */}
-      <div className="section-block">
-        <div className="section-label">Scope</div>
-        <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
-          {(cat.assets||[]).map(a=><span key={a} className="tag">{a}</span>)}
-          {(cat.sectors||[]).map(s=><span key={s} className="tag" style={{color:'var(--text2)'}}>{s}</span>)}
-          {(cat.tags||[]).map(t=><span key={t} className="tag" style={{color:'var(--text3)'}}>{t}</span>)}
-          {!(cat.assets||[]).length && !(cat.sectors||[]).length && <span style={{fontSize:11,color:'var(--text3)'}}>Global / cross-sector</span>}
-        </div>
-      </div>
-
-      {/* Timeline */}
-      <div className="section-block">
-        <div className="section-label">Timeline</div>
-        <div style={{display:'flex',gap:20,fontSize:11,color:'var(--text2)',fontFamily:'var(--mono)'}}>
-          <span>Detected {timeAgo(cat.detected_at)}</span>
-          <span>Updated {timeAgo(cat.updated_at)}</span>
-          <span>Expires {timeAgo(cat.expires_at)}</span>
-          <span>Type: {cat.type}</span>
-        </div>
-      </div>
-
-      {/* Signal chain */}
-      <div className="section-block">
-        <div className="section-label">Signal Chain ({(cat.signals||[]).length} signals)</div>
-        {(cat.signals||[]).slice(-6).reverse().map((s,i)=>(
-          <div key={i} className="sig-row">
-            <div className="sig-source">{s.source} · str {Math.round(s.strength||0)} · {timeAgo(s.ts)}</div>
-            <div className="sig-text">{s.summary}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Attention */}
-      <div className="section-block">
-        <div className="section-label">Attention State</div>
-        <div className="att-btn-row">
-          {[['watch','◎ Watch','active-watch'],['focus','◉ Focus','active-focus'],['actioned','✓ Actioned','active-actioned']].map(([state,label,activeClass])=>(
-            <button key={state} className={`att-btn${cat.attention===state?' '+activeClass:''}`} onClick={()=>onAttention(cat.id,state)}>{label}</button>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,maxWidth:780,width:"100%"}}>
+          {[
+            {icon:"◈",title:"9 Research Bots",desc:"Geo, macro, earnings, fundamentals, news, technical, insider, analyst, hiring"},
+            {icon:"◉",title:"Wave Intelligence",desc:"Spark → Confirmed → Escalation → Structural → Regime with evidence gating"},
+            {icon:"◎",title:"Sebastian AI",desc:"Ask questions about any asset in plain English — or dive into full technical depth"},
+            {icon:"⊕",title:"Live Prices",desc:"Real-time Yahoo Finance prices across stocks, crypto, forex, metals and more"},
+          ].map(f=>(
+            <div key={f.title} style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:6,padding:"14px",textAlign:"left"}}>
+              <div style={{fontSize:18,color:"var(--blue)",marginBottom:6,fontFamily:"monospace"}}>{f.icon}</div>
+              <div style={{fontSize:11,fontWeight:600,color:"#c8cce8",marginBottom:4}}>{f.title}</div>
+              <div style={{fontSize:9,color:"var(--text2)",lineHeight:1.6}}>{f.desc}</div>
+            </div>
           ))}
         </div>
       </div>
+    </div>
+  );
 
-      {/* Actions */}
-      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        <button className="btn btn-ghost btn-sm" onClick={()=>onAskSebastian(`Interpret catalyst: "${cat.title.slice(0,80)}". Wave: ${cat.wave}. Confidence: ${cat.confidence}%. Direction: ${cat.direction}. Sources: ${sources.join(', ')}.`)}>
-          Ask Sebastian
-        </button>
-        <button className="btn btn-ghost btn-sm" onClick={()=>onVerify(cat.id)} disabled={verifying}>
-          {verifying ? 'Verifying...' : '⊕ Verify (Perplexity)'}
-        </button>
-        <button className="btn btn-danger btn-sm" onClick={()=>onDismiss(cat.id)}>Dismiss</button>
+  const isSignup=mode==="signup";
+  return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16,background:"var(--bg0)"}}>
+      <div style={{width:"100%",maxWidth:360,animation:"fadeUp 0.25s ease"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontSize:22,fontWeight:900,letterSpacing:3}}>MARKET <span style={{color:"var(--blue)"}}>BRAIN</span></div>
+          <div style={{fontSize:9,color:"var(--text2)",marginTop:3}}>{isSignup?"Create your account":"Welcome back"}</div>
+        </div>
+        <div style={{background:"var(--bg1)",border:"1px solid var(--border2)",borderRadius:8,padding:22}}>
+          {isSignup&&<div style={{marginBottom:12}}><div style={{fontSize:7,color:"var(--text3)",letterSpacing:2,marginBottom:4}}>NAME</div><input value={form.name} onChange={set("name")} placeholder="Your name" className="input-dark"/></div>}
+          <div style={{marginBottom:12}}><div style={{fontSize:7,color:"var(--text3)",letterSpacing:2,marginBottom:4}}>EMAIL</div><input value={form.email} onChange={set("email")} type="email" placeholder="you@example.com" className="input-dark"/></div>
+          <div style={{marginBottom:18}}><div style={{fontSize:7,color:"var(--text3)",letterSpacing:2,marginBottom:4}}>PASSWORD</div><input value={form.password} onChange={set("password")} type="password" placeholder={isSignup?"Min 6 characters":"Your password"} className="input-dark" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+          {error&&<div style={{background:"#ff4d6a18",border:"1px solid #ff4d6a44",borderRadius:4,padding:"7px 10px",fontSize:9,color:"#ff8090",marginBottom:12}}>{error}</div>}
+          <button onClick={submit} disabled={loading} style={{width:"100%",background:loading?"var(--bg3)":"linear-gradient(135deg,var(--blue),#0065cc)",border:"none",borderRadius:5,padding:"10px",color:loading?"var(--text3)":"#fff",fontSize:10,letterSpacing:1,fontWeight:600}}>{loading?"...":(isSignup?"CREATE ACCOUNT":"LOG IN")}</button>
+          <div style={{textAlign:"center",marginTop:12,fontSize:8,color:"var(--text2)"}}>
+            {isSignup?"Have an account? ":"No account? "}
+            <span onClick={()=>{setMode(isSignup?"login":"signup");setError("");}} style={{color:"var(--blue)",cursor:"pointer"}}>{isSignup?"Log in":"Sign up free"}</span>
+          </div>
+        </div>
+        <button onClick={()=>setMode("home")} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:"var(--text3)",fontSize:8}}>← Back</button>
       </div>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════
-   SEBASTIAN TAB
-═══════════════════════════════════════════════ */
-function SebastianTab({ pendingQuery, onQueryConsumed }) {
-  const [msgs, setMsgs]   = useState([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy]   = useState(false);
-  const [brief, setBrief] = useState(null);
-  const bottomRef = useRef(null);
+// ─────────────────────────────────────────────────────────────
+//  MAIN APP
+// ─────────────────────────────────────────────────────────────
+function MainApp({user,onLogout}){
+  const[intel,setIntel]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[liveCount,setLiveCount]=useState(0);
+  const[fxRates,setFxRates]=useState(null);
+  const[lastUpdated,setLastUpdated]=useState(null);
+  const[selected,setSelected]=useState(null);
+  const[filterSector,setFilterSector]=useState("All");
+  const[filterCap,setFilterCap]=useState("All");
+  const[filterWave,setFilterWave]=useState("All");
+  const[filterBias,setFilterBias]=useState("All");
+  const[sortMode,setSortMode]=useState("confidence");
+  const[searchQ,setSearchQ]=useState("");
+  const[currency,setCurrency]=useState(CURRENCIES[0]);
+  const[watchlist,setWatchlist]=useState([]);
+  const[showCurrModal,setShowCurrModal]=useState(false);
+  const[sebastianTarget,setSebastianTarget]=useState(null);
+  const[saving,setSaving]=useState(false);
+  const sessionKeyRef=useRef(Date.now());
 
-  useEffect(() => {
-    // Load daily brief on mount
-    api('/api/sebastian/summarise', { method:'POST' }).then(d=>setBrief(d.brief)).catch(()=>{});
-  }, []);
+  // Load portfolio
+  useEffect(()=>{
+    api("/api/portfolio").then(p=>{if(p.watchItems)setWatchlist(p.watchItems);}).catch(()=>{});
+  },[]);
 
-  useEffect(() => {
-    if (pendingQuery) {
-      setInput(pendingQuery);
-      onQueryConsumed?.();
-    }
-  }, [pendingQuery]);
+  // Auto-save
+  const savePortfolio=useCallback(async(w)=>{
+    setSaving(true);
+    try{await api("/api/portfolio",{method:"POST",body:JSON.stringify({trades:[],watchItems:w,balance:1000,startBalance:1000})});}
+    catch{}
+    setSaving(false);
+  },[]);
+  useEffect(()=>{const t=setTimeout(()=>savePortfolio(watchlist),2500);return()=>clearTimeout(t);},[watchlist]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }); }, [msgs]);
+  // FX
+  const toLocal=useCallback((usd)=>{
+    let rate;
+    if(fxRates?.USD&&fxRates[currency.code]!==undefined)rate=fxRates[currency.code]/fxRates.USD;
+    else rate=currency.fb/1.27;
+    return parseFloat((usd*rate).toFixed(4));
+  },[fxRates,currency]);
+  const fmtMoney=useCallback((usd)=>{
+    const v=toLocal(usd);
+    return`${currency.symbol}${v>=10000?v.toFixed(0):v>=100?v.toFixed(2):v>=1?v.toFixed(2):v.toFixed(4)}`;
+  },[toLocal,currency]);
 
-  async function send(text) {
-    const q = (text||input).trim();
-    if (!q || busy) return;
-    setInput('');
-    setMsgs(prev=>[...prev, { role:'user', text:q }]);
-    setBusy(true);
-    try {
-      const history = msgs.map(m=>({ role:m.role==='user'?'user':'assistant', content:m.text }));
-      const data = await api('/api/sebastian/interpret', { method:'POST', body:{ message:q, history } });
-      setMsgs(prev=>[...prev, { role:'sebastian', text:data.response }]);
-    } catch(e) {
-      setMsgs(prev=>[...prev, { role:'sebastian', text:`Error: ${e.message}` }]);
-    }
-    setBusy(false);
-  }
+  // Refresh
+  const doRefresh=useCallback(async()=>{
+    const key=sessionKeyRef.current;
+    const fresh={};
+    ASSETS.forEach(a=>{fresh[a.ticker]=generateIntelligence(a,key);});
+    try{
+      const[liveData,liveFx]=await Promise.all([fetchLivePrices(ASSETS.map(a=>a.ticker)),fetchFxRates()]);
+      if(liveFx)setFxRates(liveFx);
+      if(liveData){
+        let cnt=0;
+        ASSETS.forEach(a=>{
+          const merged=mergeLive(fresh[a.ticker],liveData,a.ticker);
+          fresh[a.ticker]=merged;
+          if(merged.livePrice)cnt++;
+        });
+        setLiveCount(cnt);
+      }
+    }catch{}
+    setIntel(fresh);
+    setLastUpdated(new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
+    setLoading(false);
+  },[]);
 
-  const shortcuts = [
-    'What are the highest conviction signals right now?',
-    'Summarise wave transitions in the last 24h',
-    'Which catalysts should I focus on?',
-    'Explain the current macro regime',
-    'What signals need immediate attention?',
-  ];
+  useEffect(()=>{doRefresh();},[]);
+  useEffect(()=>{const t=setInterval(doRefresh,30000);return()=>clearInterval(t);},[]);
 
-  return (
-    <div className="seb-shell">
-      <div className="seb-header">
-        <div className="seb-engine-label">Interpretation Engine</div>
-        <div className="seb-title">Sebastian</div>
-        <div className="seb-sub">Catalyst interpretation · Wave analysis · Signal reasoning</div>
-      </div>
+  // Filtered + sorted
+  const filtered=useMemo(()=>
+    ASSETS.filter(a=>{
+      if(!intel[a.ticker])return false;
+      const sig=intel[a.ticker];
+      if(filterSector!=="All"&&a.sector!==filterSector)return false;
+      if(filterCap!=="All"&&a.cap!==filterCap)return false;
+      if(filterWave!=="All"&&sig.wave!==filterWave)return false;
+      if(filterBias!=="All"&&sig.bias!==filterBias)return false;
+      if(searchQ){const q=searchQ.toLowerCase();if(!a.ticker.toLowerCase().includes(q)&&!a.name.toLowerCase().includes(q)&&!a.sector.toLowerCase().includes(q))return false;}
+      return true;
+    }).sort((a,b)=>{
+      const sa=intel[a.ticker],sb=intel[b.ticker];
+      if(sortMode==="confidence")return sb.confidence-sa.confidence;
+      if(sortMode==="wave")return WAVE_STATES.indexOf(sb.wave)-WAVE_STATES.indexOf(sa.wave);
+      if(sortMode==="intensity")return sb.intensity-sa.intensity;
+      if(sortMode==="change")return(sb.changePct||0)-(sa.changePct||0);
+      if(sortMode==="change_neg")return(sa.changePct||0)-(sb.changePct||0);
+      return 0;
+    })
+  ,[intel,filterSector,filterCap,filterWave,filterBias,sortMode,searchQ]);
 
-      <div className="seb-body">
-        {/* Daily brief */}
-        {brief && (
-          <div className="seb-block" style={{borderLeftColor:'var(--accent)',borderLeft:'2px solid var(--accent)'}}>
-            <div className="seb-block-label">Daily Intelligence Brief</div>
-            <div className="seb-block-text">{brief}</div>
-          </div>
-        )}
+  const watchedTickers=new Set(watchlist.map(w=>w.ticker));
+  const escalatingCount=Object.values(intel).filter(i=>["escalation","structural","regime"].includes(i.wave)).length;
 
-        {msgs.length === 0 && !brief && (
-          <div style={{color:'var(--text3)',fontSize:12,padding:'12px 0'}}>Sebastian is ready. Use a shortcut or ask a question.</div>
-        )}
-
-        {msgs.map((m,i)=>(
-          m.role==='user' ? (
-            <div key={i} className="seb-user-block">
-              <div className="seb-user-label">You</div>
-              <div className="seb-user-text">{m.text}</div>
-            </div>
-          ) : (
-            <div key={i} className="seb-block" style={{borderLeft:'2px solid var(--accent)'}}>
-              <div className="seb-block-label">Sebastian</div>
-              <div className="seb-block-text">{m.text}</div>
-            </div>
-          )
-        ))}
-
-        {busy && (
-          <div className="seb-block loading-pulse" style={{borderLeft:'2px solid var(--accent)'}}>
-            <div className="seb-block-label">Sebastian</div>
-            <div className="seb-block-text">Interpreting signals...</div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="seb-shortcuts">
-        {shortcuts.map((s,i)=>(
-          <button key={i} className="shortcut-btn" onClick={()=>send(s)}>{s}</button>
-        ))}
-      </div>
-
-      <div className="seb-input-area">
-        <textarea className="seb-textarea" rows={1} value={input} onChange={e=>setInput(e.target.value)}
-          onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } }}
-          placeholder="Ask Sebastian to interpret a catalyst, wave, or signal alignment..." />
-        <button className="btn btn-primary" onClick={()=>send()} disabled={busy}>Send</button>
-      </div>
+  if(loading)return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
+      <div style={{width:36,height:36,border:"2px solid var(--border2)",borderTop:"2px solid var(--blue)",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontSize:9,color:"var(--text3)",letterSpacing:2}}>LOADING INTELLIGENCE...</div>
     </div>
   );
-}
 
-/* ═══════════════════════════════════════════════
-   ASSETS TAB
-═══════════════════════════════════════════════ */
-function AssetsTab({ onAskSebastian }) {
-  const [assets, setAssets]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter]   = useState('all');
-  const [addTicker, setAddTicker] = useState('');
+  return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
-  useEffect(() => {
-    api('/api/assets').then(d=>{ setAssets(d.assets||[]); setLoading(false); }).catch(()=>setLoading(false));
-  }, []);
-
-  async function addWatch(ticker) {
-    await api(`/api/profile/watchlist/${ticker.toUpperCase()}`, { method:'POST' }).catch(()=>{});
-    setAssets(prev=>prev.map(a=>a.ticker===ticker.toUpperCase()?{...a,on_watchlist:true}:a));
-  }
-
-  async function addManual() {
-    if (!addTicker.trim()) return;
-    await addWatch(addTicker.trim().toUpperCase());
-    setAddTicker('');
-    // Refresh
-    const d = await api('/api/assets').catch(()=>({assets:[]}));
-    setAssets(d.assets||[]);
-  }
-
-  const filtered = useMemo(()=>{
-    if (filter==='catalyst') return assets.filter(a=>a.catalysts?.length>0);
-    if (filter==='focus')    return assets.filter(a=>a.on_focus);
-    if (filter==='watchlist')return assets.filter(a=>a.on_watchlist);
-    if (filter==='actioned') return assets.filter(a=>a.attention==='actioned');
-    return assets;
-  }, [assets, filter]);
-
-  return (
-    <div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
-        <div>
-          <div style={{fontSize:15,fontWeight:600,marginBottom:2}}>Intelligence Index</div>
-          <div style={{fontSize:11,color:'var(--text2)'}}>{assets.length} assets tracked · {assets.filter(a=>a.catalysts?.length>0).length} with active catalysts</div>
-        </div>
-        <div style={{display:'flex',gap:6}}>
-          <input value={addTicker} onChange={e=>setAddTicker(e.target.value.toUpperCase())}
-            onKeyDown={e=>e.key==='Enter'&&addManual()}
-            placeholder="Add ticker..." style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:'6px 10px',color:'var(--text)',fontFamily:'var(--mono)',fontSize:12,width:120,outline:'none'}} />
-          <button className="btn btn-ghost btn-sm" onClick={addManual}>+ Watch</button>
-        </div>
-      </div>
-
-      <div className="assets-filter">
-        {['all','catalyst','watchlist','focus','actioned'].map(f=>(
-          <button key={f} className={`btn btn-ghost btn-sm${filter===f?' active':''}`}
-            style={{borderColor:filter===f?'var(--accent)':'',color:filter===f?'var(--accent)':''}}
-            onClick={()=>setFilter(f)}>{f}</button>
-        ))}
-      </div>
-
-      {loading && <div className="empty"><h3>Loading asset intelligence...</h3></div>}
-      {!loading && filtered.length===0 && (
-        <div className="empty">
-          <h3>No assets match this filter</h3>
-          <p>Add tickers to your watchlist or start a mission to track assets</p>
+      {/* Currency modal */}
+      {showCurrModal&&(
+        <div className="modal-overlay" onClick={()=>setShowCurrModal(false)}>
+          <div className="modal-box" style={{width:"100%",maxWidth:300,padding:8}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:8,color:"var(--text3)",letterSpacing:2,padding:"8px 8px 4px"}}>SELECT CURRENCY</div>
+            {CURRENCIES.map(c=>{
+              const isA=c.code===currency.code;
+              return(
+                <div key={c.code} onClick={()=>{setCurrency(c);setShowCurrModal(false);}} style={{display:"flex",gap:10,alignItems:"center",padding:"8px",borderRadius:4,cursor:"pointer",background:isA?"var(--bg3)":"transparent",marginBottom:2}}>
+                  <span style={{fontSize:16}}>{c.flag}</span>
+                  <span style={{fontSize:11,fontWeight:600,color:isA?"var(--blue)":"var(--text)",fontFamily:"monospace"}}>{c.code}</span>
+                  <span style={{fontSize:9,color:"var(--text3)",flex:1}}>{c.symbol}</span>
+                  {isA&&<span style={{color:"var(--blue)",fontSize:10}}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      <div className="assets-grid">
-        {filtered.map(a=>(
-          <div key={a.ticker} className={`asset-card${a.on_focus?' focus-on':a.attention==='actioned'?' actioned-on':a.on_watchlist?' watch-on':''}`}>
-            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:2}}>
-              <div className="asset-ticker">{a.ticker}</div>
-              {a.on_watchlist && !a.on_focus && <span style={{fontSize:9,color:'var(--text3)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>WATCHING</span>}
-              {a.on_focus     && <span style={{fontSize:9,color:'var(--amber)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>FOCUS</span>}
-            </div>
-            <div className="asset-sector">{a.sector||'—'}</div>
-            {a.top_conf>0 ? (
-              <>
-                <div className="asset-conf-num" style={{color:confColor(a.top_conf)}}>{a.top_conf.toFixed(0)}%</div>
-                <div style={{display:'flex',gap:5,marginTop:6,flexWrap:'wrap'}}>
-                  <WaveBadge wave={a.top_wave} />
-                  <DirBadge dir={a.direction} />
-                </div>
-                <div style={{fontSize:10,color:'var(--text3)',marginTop:6,fontFamily:'var(--mono)'}}>
-                  {a.catalysts?.length||0} catalyst{a.catalysts?.length!==1?'s':''}
-                </div>
-              </>
-            ) : (
-              <div className="no-signal">No active signals</div>
-            )}
-            <div style={{display:'flex',gap:5,marginTop:10,flexWrap:'wrap'}}>
-              {!a.on_watchlist && <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={()=>addWatch(a.ticker)}>+ Watch</button>}
-              {a.top_conf>0 && <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={()=>onAskSebastian(`What does the ${a.top_wave} wave signal mean for ${a.ticker}? Confidence is ${a.top_conf.toFixed(0)}%, direction ${a.direction}.`)}>Ask Sebastian</button>}
-            </div>
+      {/* Sebastian modal */}
+      {sebastianTarget&&(
+        <SebastianModal
+          asset={sebastianTarget.asset}
+          intel={sebastianTarget.intel}
+          fmtMoney={fmtMoney}
+          onClose={()=>setSebastianTarget(null)}
+        />
+      )}
+
+      {/* ── HEADER ── */}
+      <div style={{borderBottom:"1px solid var(--border)",padding:"6px 12px",display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap",background:"var(--bg1)"}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:17,fontWeight:900,letterSpacing:2,color:"#e0e4ff"}}>
+          MARKET <span style={{color:"var(--blue)"}}>BRAIN</span>
+        </div>
+        <div style={{height:16,width:1,background:"var(--border)",flexShrink:0}}/>
+        <div style={{display:"flex",gap:5,flex:1,flexWrap:"wrap",alignItems:"center"}}>
+          {/* Summary chips */}
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 8px",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>ESCALATING</span>
+            <span style={{fontSize:10,color:"#f5c842",fontWeight:600,fontFamily:"monospace"}}>{escalatingCount}</span>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   MISSIONS TAB
-═══════════════════════════════════════════════ */
-function MissionsTab({ onCreated }) {
-  const [missions, setMissions] = useState([]);
-  const [mtype, setMtype]       = useState('asset');
-  const [target, setTarget]     = useState('');
-  const [desc, setDesc]         = useState('');
-  const [priority, setPrio]     = useState('normal');
-  const [err, setErr]           = useState('');
-  const [busy, setBusy]         = useState(false);
-  const [loading, setLoading]   = useState(true);
-
-  useEffect(()=>{
-    api('/api/missions').then(d=>{ setMissions(d.missions||[]); setLoading(false); }).catch(()=>setLoading(false));
-  },[]);
-
-  async function create() {
-    if (!target.trim()) { setErr('Enter a target'); return; }
-    setErr(''); setBusy(true);
-    try {
-      const data = await api('/api/missions', { method:'POST', body:{ mission_type:mtype, target:target.trim(), description:desc, priority } });
-      setMissions(prev=>[data.mission,...prev]);
-      setTarget(''); setDesc('');
-      onCreated?.();
-    } catch(e) { setErr(e.message); }
-    setBusy(false);
-  }
-
-  async function cancel(id) {
-    await api(`/api/missions/${id}`,{method:'DELETE'}).catch(()=>{});
-    setMissions(prev=>prev.filter(m=>m.id!==id));
-  }
-
-  const types = [
-    { id:'asset',    icon:'◈', label:'Asset',    example:'NVDA, AAPL' },
-    { id:'sector',   icon:'◫', label:'Sector',   example:'Technology, Energy' },
-    { id:'theme',    icon:'◎', label:'Theme',    example:'AI, Defence' },
-    { id:'region',   icon:'◉', label:'Region',   example:'Middle East, Asia' },
-    { id:'macro',    icon:'◆', label:'Macro',    example:'Fed rates, CPI' },
-    { id:'industry', icon:'◌', label:'Industry', example:'Semiconductors' },
-  ];
-
-  const placeholders = { asset:'e.g. NVDA', sector:'e.g. Technology', theme:'e.g. AI Infrastructure', region:'e.g. Middle East', macro:'e.g. Fed interest rates', industry:'e.g. Semiconductors' };
-
-  return (
-    <div>
-      <div style={{marginBottom:20}}>
-        <div style={{fontSize:15,fontWeight:600,marginBottom:2}}>Missions</div>
-        <div style={{fontSize:11,color:'var(--text2)'}}>Send Sebastian to track an asset, sector, theme, or macro indicator</div>
-      </div>
-
-      <div className="card" style={{marginBottom:24}}>
-        <div className="card-head"><span className="card-title">New Mission</span></div>
-        <div className="card-body">
-          <div style={{marginBottom:14}}>
-            <div className="section-label">Mission Type</div>
-            <div className="mission-type-grid">
-              {types.map(t=>(
-                <button key={t.id} className={`mtype-btn${mtype===t.id?' sel':''}`} onClick={()=>setMtype(t.id)}>
-                  <div className="mtype-icon">{t.icon}</div>
-                  <div>{t.label}</div>
-                  <div style={{fontSize:9,color:'var(--text3)',marginTop:3}}>{t.example}</div>
-                </button>
-              ))}
-            </div>
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 8px",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>LIVE</span>
+            <span style={{fontSize:10,color:liveCount>0?"var(--green)":"var(--text3)",fontWeight:600,fontFamily:"monospace"}}>{liveCount}</span>
           </div>
-
-          <div className="field">
-            <label>Target</label>
-            <input value={target} onChange={e=>setTarget(e.target.value)} placeholder={placeholders[mtype]} onKeyDown={e=>e.key==='Enter'&&create()} />
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 8px",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>WATCHED</span>
+            <span style={{fontSize:10,color:"#f5c842",fontWeight:600,fontFamily:"monospace"}}>{watchlist.length}</span>
           </div>
-          <div className="field">
-            <label>Description (optional)</label>
-            <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="What specifically should Sebastian track?" />
-          </div>
-
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-            <span style={{fontSize:11,color:'var(--text2)'}}>Priority:</span>
-            {['normal','high','critical'].map(p=>(
-              <button key={p} className={`btn btn-ghost btn-sm`}
-                style={{borderColor:priority===p?(p==='critical'?'var(--red)':p==='high'?'var(--amber)':'var(--accent)'):'',
-                  color:priority===p?(p==='critical'?'var(--red)':p==='high'?'var(--amber)':'var(--accent)'):'',
-                  textTransform:'uppercase',fontSize:10,fontFamily:'var(--mono)'}}
-                onClick={()=>setPrio(p)}>{p}</button>
-            ))}
-          </div>
-
-          {err && <div className="err-box" style={{marginBottom:12}}>{err}</div>}
-          <button className="btn btn-primary" style={{width:'100%'}} onClick={create} disabled={busy}>
-            {busy ? 'Launching...' : '◎ Launch Mission'}
+          {saving&&<span style={{fontSize:7,color:"var(--text3)"}}>saving...</span>}
+        </div>
+        <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:"auto"}}>
+          <button onClick={()=>setShowCurrModal(true)} style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:4,padding:"3px 8px",display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:12}}>{currency.flag}</span>
+            <span style={{fontSize:8,color:"var(--blue)",fontWeight:600}}>{currency.code}</span>
           </button>
+          <button onClick={doRefresh} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 7px",color:"var(--text2)",fontSize:11}}>↻</button>
+          <span style={{fontSize:8,color:"var(--text3)"}}>Hi, {user.name.split(" ")[0]}</span>
+          <button onClick={async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem("mb_token");onLogout();}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:4,padding:"3px 7px",color:"var(--text3)",fontSize:7,letterSpacing:.5}}>OUT</button>
         </div>
       </div>
 
-      <div style={{fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.07em',color:'var(--text2)',marginBottom:10}}>
-        Active Missions ({missions.length})
-      </div>
-      <div className="card">
-        {loading && <div style={{padding:16,color:'var(--text3)',fontSize:12}}>Loading missions...</div>}
-        {!loading && missions.length===0 && (
-          <div className="empty" style={{padding:28}}><h3>No active missions</h3><p>Launch a mission above to start tracking</p></div>
-        )}
-        {missions.map(m=>(
-          <div key={m.id} className="mission-item">
-            <div>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                <div className="mission-target">{m.target}</div>
-                <span className={`prio-badge prio-${m.priority}`}>{m.priority}</span>
-                <span style={{fontSize:10,color:'var(--text3)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>{m.type}</span>
-              </div>
-              <div className="mission-desc">{m.description?.slice(0,80)}</div>
-            </div>
-            <button className="btn btn-danger btn-sm" onClick={()=>cancel(m.id)} style={{flexShrink:0}}>Cancel</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   CHAIN STATUS MODAL
-═══════════════════════════════════════════════ */
-function ChainModal({ onClose }) {
-  const [chain, setChain] = useState(null);
-  useEffect(()=>{
-    api('/api/chain/status').then(setChain).catch(()=>{});
-  },[]);
-
-  function statusEl(val) {
-    if (val===true||val==='integrated'||val==='connected') return <span className="chain-ok">✓ active</span>;
-    if (val===false||val==='memory_fallback') return <span className="chain-warn">{typeof val==='string'?val:'✗ inactive'}</span>;
-    return <span className="chain-ok">{val}</span>;
-  }
-
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div className="modal-title">Signal Chain — Phase 1 Status</div>
-        {!chain && <div style={{color:'var(--text2)',fontSize:12}}>Checking chain...</div>}
-        {chain && Object.entries(chain.chain).map(([k,v])=>(
-          <div key={k} className="chain-row">
-            <span style={{fontFamily:'var(--mono)',fontSize:11}}>{k.replace(/_/g,' ')}</span>
-            {statusEl(v)}
-          </div>
-        ))}
-        {chain?.counts && (
-          <div style={{marginTop:12,padding:'8px 11px',background:'var(--bg4)',borderRadius:'var(--r)',fontSize:11,color:'var(--text2)',fontFamily:'var(--mono)'}}>
-            {chain.counts.active_catalysts} active catalysts · {chain.counts.missions} missions
-          </div>
-        )}
-        {chain?.warnings?.map((w,i)=>(
-          <div key={i} style={{marginTop:6,fontSize:11,color:'var(--amber)'}}>⚠ {w}</div>
-        ))}
-        <button className="btn btn-ghost" style={{marginTop:16,width:'100%'}} onClick={onClose}>Close</button>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   ROOT APP
-═══════════════════════════════════════════════ */
-function App() {
-  const [user, setUser]         = useState(null);
-  const [checking, setChecking] = useState(true);
-  const [tab, setTab]           = useState('intelligence');
-  const [catalysts, setCatalysts] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [catsLoading, setCatsLoading] = useState(true);
-  const [verifying, setVerifying] = useState(false);
-  const [showChain, setShowChain] = useState(false);
-  const [sebQuery, setSebQuery] = useState('');
-  const [refreshTs, setRefreshTs] = useState(null);
-
-  // Restore session
-  useEffect(()=>{
-    if (_token) {
-      api('/api/auth/me').then(u=>{ setUser(u); setChecking(false); })
-        .catch(()=>{ _token=''; localStorage.removeItem('mb_token'); setChecking(false); });
-    } else { setChecking(false); }
-  },[]);
-
-  const fetchCatalysts = useCallback(async()=>{
-    setCatsLoading(true);
-    try {
-      const d = await api('/api/cos/catalysts?status=active');
-      setCatalysts(d.catalysts||[]);
-      setRefreshTs(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}));
-    } catch(e) {}
-    setCatsLoading(false);
-  },[]);
-
-  useEffect(()=>{
-    if (user) {
-      fetchCatalysts();
-      const t = setInterval(fetchCatalysts, 30000);
-      return ()=>clearInterval(t);
-    }
-  },[user, fetchCatalysts]);
-
-  async function handleAttention(catId, state) {
-    await api('/api/cos/attention',{method:'POST',body:{catalyst_id:catId,state}});
-    const update = c => c.id===catId ? {...c,attention:state} : c;
-    setCatalysts(prev=>prev.map(update));
-    setSelected(s=>s?.id===catId ? {...s,attention:state} : s);
-  }
-
-  async function handleVerify(catId) {
-    setVerifying(true);
-    try {
-      const data = await api(`/api/perplexity/verify?catalyst_id=${catId}`,{method:'POST'});
-      setCatalysts(prev=>prev.map(c=>c.id===catId ? {...c, confidence:data.confidence_after, wave:data.wave_after, verified:true} : c));
-      setSelected(s=>s?.id===catId ? {...s, confidence:data.confidence_after, wave:data.wave_after, verified:true} : s);
-    } catch(e) { alert('Verification failed: '+e.message); }
-    setVerifying(false);
-  }
-
-  async function handleDismiss(catId) {
-    await api(`/api/cos/catalyst/${catId}`,{method:'DELETE'});
-    setCatalysts(prev=>prev.filter(c=>c.id!==catId));
-    if (selected?.id===catId) setSelected(null);
-  }
-
-  function handleAskSebastian(q) {
-    setSebQuery(q);
-    setTab('sebastian');
-  }
-
-  function logout() {
-    api('/api/auth/logout',{method:'POST'}).catch(()=>{});
-    _token=''; localStorage.removeItem('mb_token');
-    setUser(null); setCatalysts([]); setSelected(null);
-  }
-
-  if (checking) return <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text3)'}}>Loading...</div>;
-  if (!user)    return <AuthScreen onAuth={setUser} />;
-
-  const focusCount    = catalysts.filter(c=>c.attention==='focus').length;
-  const actionedCount = catalysts.filter(c=>c.attention==='actioned').length;
-  const highConf      = catalysts.filter(c=>c.confidence>=65).length;
-
-  return (
-    <div className="shell">
-      {showChain && <ChainModal onClose={()=>setShowChain(false)} />}
-
-      {/* Topbar */}
-      <div className="topbar">
-        <div style={{display:'flex',alignItems:'center'}}>
-          <div className="logo">
-            <div className="logo-mark">M</div>
-            <span>Market Brain</span>
-          </div>
-          <nav className="nav">
-            {[
-              ['intelligence','Intelligence'],
-              ['sebastian','Sebastian'],
-              ['assets','Assets'],
-              ['missions','Missions'],
-            ].map(([id,label])=>(
-              <button key={id} className={`nav-btn${tab===id?' active':''}`} onClick={()=>setTab(id)}>{label}</button>
+      {/* ── FILTER BAR ── */}
+      <div style={{borderBottom:"1px solid var(--border)",padding:"5px 12px",background:"var(--bg1)",flexShrink:0}}>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
+          {/* Search */}
+          <input
+            value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+            placeholder="search ticker / name..."
+            className="input-dark"
+            style={{width:130,padding:"3px 8px",fontSize:9}}
+          />
+          {/* Sector */}
+          <div style={{height:16,width:1,background:"var(--border)",margin:"0 3px"}}/>
+          {SECTORS.map(s=>(
+            <button key={s} className={`pill${filterSector===s?" active":""}`} onClick={()=>setFilterSector(s)}>
+              {s==="All"?"ALL SECTORS":s.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+          {/* Cap */}
+          {CAPS_ORDER.map(c=>(
+            <button key={c} className={`pill${filterCap===c?" active":""}`} onClick={()=>setFilterCap(c)} style={filterCap===c?{borderColor:CAP_COLORS[c]||"var(--border2)",color:CAP_COLORS[c]||"var(--text)"}:{}}>
+              {c==="All"?"ALL CAPS":c.toUpperCase()}
+            </button>
+          ))}
+          <div style={{height:16,width:1,background:"var(--border)",margin:"0 3px"}}/>
+          {/* Wave filter */}
+          {["All",...WAVE_STATES].map(w=>(
+            <button key={w} className={`pill${filterWave===w?" active":""}`} onClick={()=>setFilterWave(w)} style={filterWave===w&&w!=="All"?{borderColor:WAVE_CFG[w]?.color+"66",color:WAVE_CFG[w]?.color}:{}}>
+              {w==="All"?"ALL WAVES":(WAVE_CFG[w]?.label||w.toUpperCase())}
+            </button>
+          ))}
+          <div style={{height:16,width:1,background:"var(--border)",margin:"0 3px"}}/>
+          {/* Bias */}
+          {["All","bullish","neutral","bearish"].map(b=>(
+            <button key={b} className={`pill${filterBias===b?" active":""}`} onClick={()=>setFilterBias(b)}>
+              {b==="All"?"ALL BIAS":b.toUpperCase()}
+            </button>
+          ))}
+          <div style={{marginLeft:"auto",display:"flex",gap:3}}>
+            {[["confidence","CONF"],["wave","WAVE"],["intensity","INT"],["change","TOP ▲"],["change_neg","TOP ▼"]].map(([v,l])=>(
+              <button key={v} className={`pill${sortMode===v?" active":""}`} onClick={()=>setSortMode(v)}>{l}</button>
             ))}
-          </nav>
-        </div>
-
-        <div className="topbar-right">
-          {highConf>0 && <span style={{fontSize:11,color:'var(--green)',fontFamily:'var(--mono)'}}>▲ {highConf} high</span>}
-          {focusCount>0 && <span style={{fontSize:11,color:'var(--amber)',fontFamily:'var(--mono)'}}>◉ {focusCount} focus</span>}
-          {actionedCount>0 && <span style={{fontSize:11,color:'var(--green)',fontFamily:'var(--mono)'}}>✓ {actionedCount} actioned</span>}
-          <div className="pill" onClick={()=>setShowChain(true)} data-tip="View signal chain status">
-            <div className="dot" style={{background:'var(--green)'}} />
-            <span style={{fontFamily:'var(--mono)',fontSize:10}}>chain · {refreshTs||'—'}</span>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={fetchCatalysts}>↻</button>
-          <button className="btn btn-ghost btn-sm" onClick={logout} style={{color:'var(--text3)'}}>Sign out</button>
         </div>
       </div>
 
-      {/* Main */}
-      <div className="main">
-        {/* Intelligence tab */}
-        {tab==='intelligence' && (
-          <>
-            <CatalystSidebar
-              cats={catalysts}
-              selected={selected}
-              onSelect={setSelected}
-              loading={catsLoading}
-              onNew={()=>setTab('missions')}
-            />
-            <div className="content">
-              <CatalystDetail
-                cat={selected}
-                onAttention={handleAttention}
-                onVerify={handleVerify}
-                onDismiss={handleDismiss}
-                onAskSebastian={handleAskSebastian}
-                verifying={verifying}
-              />
+      {/* ── MAIN GRID ── */}
+      <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+
+        {/* Cards grid */}
+        <div style={{flex:1,overflowY:"auto",padding:"8px 10px"}}>
+          {/* Watchlist strip (if any) */}
+          {watchlist.length>0&&(
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:7,color:"#f5c842",letterSpacing:2,marginBottom:5}}>★ WATCHLIST ({watchlist.length})</div>
+              <div style={{display:"flex",gap:5,overflowX:"auto",paddingBottom:4}}>
+                {watchlist.map(w=>{
+                  const a=ASSETS.find(x=>x.ticker===w.ticker);
+                  const sig=a?intel[a.ticker]:null;
+                  if(!a||!sig)return null;
+                  const pch=sig.changePct||0;
+                  return(
+                    <div key={w.id} onClick={()=>setSelected(a)} style={{background:"var(--bg2)",border:"1px solid #f5c84222",borderRadius:5,padding:"5px 8px",cursor:"pointer",flexShrink:0,minWidth:100}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                        <span style={{fontSize:10,fontWeight:600,color:"#e0e4ff",fontFamily:"'Barlow Condensed'",letterSpacing:.3}}>{a.ticker}</span>
+                        <WaveBadge wave={sig.wave}/>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between"}}>
+                        <span style={{fontSize:9,color:"#c0c4e0",fontFamily:"monospace"}}>{fmtMoney(sig.price)}</span>
+                        <span style={{fontSize:8,color:pCol(pch)}}>{fmtPct(pch)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </>
-        )}
+          )}
 
-        {/* Sebastian tab — full width, no sidebar */}
-        {tab==='sebastian' && (
-          <div style={{flex:1,overflow:'hidden'}}>
-            <SebastianTab pendingQuery={sebQuery} onQueryConsumed={()=>setSebQuery('')} />
+          {/* Results count */}
+          <div style={{fontSize:7,color:"var(--text3)",letterSpacing:1.5,marginBottom:6}}>
+            {filtered.length} ASSET{filtered.length!==1?"S":""} · {lastUpdated&&`Updated ${lastUpdated}`}
+          </div>
+
+          {/* Card grid */}
+          <div style={{
+            display:"grid",
+            gridTemplateColumns:`repeat(auto-fill,minmax(${selected?"150px":"160px"},1fr))`,
+            gap:5,
+          }}>
+            {filtered.map(a=>(
+              <IntelCard
+                key={a.ticker}
+                asset={a}
+                intel={intel[a.ticker]}
+                selected={selected?.ticker===a.ticker}
+                onSelect={()=>setSelected(prev=>prev?.ticker===a.ticker?null:a)}
+                fmtMoney={fmtMoney}
+                isWatching={watchedTickers.has(a.ticker)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Detail panel */}
+        {selected&&intel[selected.ticker]&&(
+          <div style={{width:300,borderLeft:"1px solid var(--border)",flexShrink:0,overflow:"hidden",display:"flex",flexDirection:"column",background:"var(--bg1)"}}>
+            {/* Panel header */}
+            <div style={{padding:"7px 10px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
+              <span style={{fontSize:7,color:"var(--text3)",letterSpacing:2}}>INTELLIGENCE DETAIL</span>
+              <button onClick={()=>setSelected(null)} style={{background:"none",border:"none",color:"var(--text3)",fontSize:14,lineHeight:1}}>×</button>
+            </div>
+            <DetailPanel
+              asset={selected}
+              intel={intel[selected.ticker]}
+              fmtMoney={fmtMoney}
+              isWatching={watchedTickers.has(selected.ticker)}
+              onWatch={(asset,sig)=>{
+                if(watchedTickers.has(asset.ticker)){
+                  setWatchlist(p=>p.filter(w=>w.ticker!==asset.ticker));
+                }else{
+                  setWatchlist(p=>[...p,{id:uid(),ticker:asset.ticker,name:asset.name,sector:asset.sector,cap:asset.cap,addedAt:Date.now(),entryPrice:sig.price,wave:sig.wave,confidence:sig.confidence}]);
+                }
+              }}
+              onAskSebastian={(asset,sig)=>setSebastianTarget({asset,intel:sig})}
+            />
           </div>
         )}
+      </div>
 
-        {/* Assets tab */}
-        {tab==='assets' && (
-          <div className="content" style={{flex:1}}>
-            <AssetsTab onAskSebastian={handleAskSebastian} />
-          </div>
-        )}
-
-        {/* Missions tab */}
-        {tab==='missions' && (
-          <div className="content" style={{flex:1,maxWidth:680}}>
-            <MissionsTab onCreated={fetchCatalysts} />
-          </div>
-        )}
+      {/* Status bar */}
+      <div style={{borderTop:"1px solid var(--border)",padding:"3px 12px",display:"flex",gap:10,alignItems:"center",flexShrink:0,background:"var(--bg1)"}}>
+        <span style={{fontSize:7,color:liveCount>0?"var(--green)":"var(--text3)",animation:liveCount>0?"pulse 2s infinite":"none"}}>
+          {liveCount>0?"● LIVE":"● SIM"}
+        </span>
+        <span style={{fontSize:7,color:"var(--text3)"}}>{liveCount} live prices · {ASSETS.length} assets tracked</span>
+        <span style={{fontSize:7,color:"var(--text3)",marginLeft:"auto"}}>Market Brain v7 · Not financial advice</span>
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+// ─────────────────────────────────────────────────────────────
+//  ROOT
+// ─────────────────────────────────────────────────────────────
+function Root(){
+  const[user,setUser]=useState(null);
+  const[checking,setChecking]=useState(true);
+
+  useEffect(()=>{
+    const token=localStorage.getItem("mb_token");
+    if(!token){setChecking(false);return;}
+    api("/api/auth/me").then(u=>{setUser(u);setChecking(false);}).catch(()=>{localStorage.removeItem("mb_token");setChecking(false);});
+  },[]);
+
+  if(checking)return(
+    <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{width:28,height:28,border:"2px solid #111128",borderTop:"2px solid var(--blue)",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+    </div>
+  );
+  if(!user)return<AuthPage onAuth={u=>setUser(u)}/>;
+  return<MainApp user={user} onLogout={()=>setUser(null)}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
 </script>
 </body>
 </html>
