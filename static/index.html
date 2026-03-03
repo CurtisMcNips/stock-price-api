@@ -944,7 +944,20 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
       setMessages([]);
       setTimeout(()=>sendMessage(initialQuestion),100);
     }else{
-      setMessages([{role:"assistant",content:"Hi — I'm Sebastian, your Market Brain analyst.\n\nI have live prices and the current intelligence chain loaded. Ask me anything about the market, a specific asset, or what the bots are seeing right now.\n\nNot sure where to start? Try:\n• \"What's the strongest signal right now?\"\n• \"Walk me through the top catalyst\"\n• \"Which sector has the most activity?\""}]);
+      // Auto-fetch landscape brief on open
+    setLoading(true);
+    callSebastian(
+      "Give me a concise intelligence landscape overview right now. Cover: (1) the highest-wave catalyst and what's driving it, (2) which sectors are most active, (3) the overall market direction bias, and (4) the top 2-3 assets I should be watching. Keep it tight — 4-5 short paragraphs.",
+      [],
+      mode,
+      {},
+    ).then(reply=>{
+      setMessages([{role:"assistant",content:reply}]);
+      setLoading(false);
+    }).catch(()=>{
+      setMessages([{role:"assistant",content:"Hi — I'm Sebastian. I have live prices and the full intelligence chain loaded.\n\nAsk me anything about the market, a specific catalyst, or what the bots are seeing right now."}]);
+      setLoading(false);
+    });
     }
   },[]);
 
