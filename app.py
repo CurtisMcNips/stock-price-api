@@ -410,6 +410,106 @@ async def websocket_price(websocket: WebSocket, symbol: str):
     finally: manager.disconnect(websocket, symbol)
 
 
+# ── Catalyst endpoints ────────────────────────────────────────
+
+@app.get("/api/catalysts", tags=["Catalysts"])
+async def get_catalysts(
+    wave:      Optional[str] = Query(None),
+    direction: Optional[str] = Query(None),
+    limit:     int           = Query(100),
+    current_user: dict       = Depends(get_current_user),
+):
+    """
+    Return all active catalysts from Redis.
+    Tries all key patterns the CoS and sweep engine may use.
+    """
+    try:
+        r = await get_redis()
+        if not r:
+            return {"catalysts": [], "total": 0, "source": "redis_unavailable"}
+
+        # Try all key patterns in priority order
+        keys = []
+        for pattern in ("catalyst:*", "cos:catalyst:*", "mb:catalyst:*", "mb:cos:catalyst:*"):
+            found = await r.keys(pattern)
+            if found:
+                keys.extend(found)
+
+        # Deduplicate
+        keys = list(dict.fromkeys(keys))
+
+        if not keys:
+            return {"catalysts": [], "total": 0, "source": "no_keys_found"}
+
+        catalysts = []
+        for key in keys:
+            try:
+                val = await r.get(key)
+                if not val:
+                    continue
+                cat = json.loads(val)
+                # Skip dismissed/expired
+                if cat.get("status") in ("dismissed", "expired"):
+                    continue
+                # Apply filters
+                if wave and cat.get("wave") != wave:
+                    continue
+                if direction and cat.get("direction") != direction:
+                    continue
+                catalysts.append(cat)
+            except Exception:
+                continue
+
+        # Sort: wave priority → confidence → recency
+        wave_order = {"regime": 5, "structural": 4, "escalation": 3, "confirmed": 2, "spark": 1}
+        catalysts.sort(
+            key=lambda c: (
+                wave_order.get(c.get("wave", "spark"), 0),
+                c.get("confidence", 0),
+                c.get("updated_at", c.get("created_at", 0)),
+            ),
+            reverse=True,
+        )
+
+        return {
+            "catalysts": catalysts[:limit],
+            "total":     len(catalysts),
+            "source":    "redis",
+            "ts":        int(time.time()),
+        }
+
+    except Exception as e:
+        log.error(f"Catalyst fetch error: {e}")
+        raise HTTPException(500, f"Catalyst fetch failed: {e}")
+
+
+@app.post("/api/catalysts/{catalyst_id}/dismiss", tags=["Catalysts"])
+async def dismiss_catalyst(
+    catalyst_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Mark a catalyst as dismissed so it's filtered from the feed."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(503, "Redis unavailable")
+
+    # Try all key patterns
+    for pattern_prefix in ("catalyst:", "cos:catalyst:", "mb:catalyst:", "mb:cos:catalyst:"):
+        key = f"{pattern_prefix}{catalyst_id}"
+        val = await r.get(key)
+        if val:
+            try:
+                cat = json.loads(val)
+                cat["status"] = "dismissed"
+                cat["dismissed_at"] = int(time.time())
+                await r.set(key, json.dumps(cat))
+                return {"ok": True, "catalyst_id": catalyst_id}
+            except Exception as e:
+                raise HTTPException(500, f"Failed to dismiss: {e}")
+
+    raise HTTPException(404, f"Catalyst {catalyst_id} not found")
+
+
 # ── Sebastian helpers ─────────────────────────────────────────
 
 async def _fetch_catalysts_for_sebastian() -> str:
