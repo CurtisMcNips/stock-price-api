@@ -662,7 +662,409 @@ function IntelCard({asset,intel,selected,onSelect,fmtMoney,isWatching}){
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SEBASTIAN MODAL
+//  SEBASTIAN API  (routes through backend — API key server-side)
+// ─────────────────────────────────────────────────────────────
+async function callSebastian(question, history=[], mode="auto", context={}){
+  const j=await api("/api/sebastian",{
+    method:"POST",
+    body:JSON.stringify({question,history,mode,context}),
+  });
+  return j.response||"Sebastian couldn't respond right now.";
+}
+
+// ─────────────────────────────────────────────────────────────
+//  CATALYST VIEW
+// ─────────────────────────────────────────────────────────────
+const WAVE_ORDER_NUM={spark:1,confirmed:2,escalation:3,structural:4,regime:5};
+
+function CatalystCard({cat,selected,onSelect}){
+  const wc=WAVE_CFG[cat.wave]||WAVE_CFG.spark;
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[cat.direction]||"#6a6a9a";
+  const isSelected=selected?.id===cat.id;
+  return(
+    <div onClick={()=>onSelect(isSelected?null:cat)}
+      style={{background:isSelected?wc.bg:"var(--bg1)",border:`1px solid ${isSelected?wc.color:"var(--border)"}`,borderRadius:6,padding:"9px 10px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.15s"}}>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:"1.5px",background:wc.color}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:3}}>
+        <WaveBadge wave={cat.wave}/>
+        <div style={{display:"flex",gap:4,alignItems:"center"}}>
+          {cat.verified&&<span style={{fontSize:7,color:"#00d68f"}}>✓</span>}
+          <span style={{fontSize:7,color:biasColor}}>{cat.direction}</span>
+        </div>
+      </div>
+      <div style={{fontSize:9,color:"#c0c4e0",lineHeight:1.4,marginBottom:4,fontWeight:500}}>{(cat.title||cat.headline||"").slice(0,70)}</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+        <span style={{fontSize:8,color:"var(--text2)"}}>{(cat.assets||[]).slice(0,3).join(" · ")||"sector-wide"}</span>
+        <span style={{fontSize:8,color:wc.color,fontFamily:"monospace",fontWeight:600}}>{(cat.confidence||0).toFixed(0)}%</span>
+      </div>
+      <div className="bar-track"><div className="bar-fill" style={{width:`${cat.confidence||0}%`,background:wc.color}}/></div>
+      <div style={{display:"flex",gap:4,marginTop:5,flexWrap:"wrap"}}>
+        {(cat.tags||[]).slice(0,4).map(t=><span key={t} style={{fontSize:6,color:"var(--text3)",border:"1px solid var(--border)",borderRadius:2,padding:"0 3px"}}>{t}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function CatalystDetail({cat,fmtMoney,onAskSebastian}){
+  const wc=WAVE_CFG[cat.wave]||WAVE_CFG.spark;
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[cat.direction]||"#6a6a9a";
+  const signals=cat.signal_chain||cat.signals||[];
+  const persona=cat.persona_summary||{};
+  const verif=cat.verification||{};
+
+  return(
+    <div style={{height:"100%",overflowY:"auto",padding:"12px 12px",display:"flex",flexDirection:"column",gap:8}}>
+      {/* Header */}
+      <div style={{borderBottom:`1px solid ${wc.color}33`,paddingBottom:8}}>
+        <div style={{display:"flex",gap:5,marginBottom:4,flexWrap:"wrap",alignItems:"center"}}>
+          <WaveBadge wave={cat.wave}/>
+          <span style={{fontSize:8,color:biasColor,fontWeight:600}}>{cat.direction?.toUpperCase()}</span>
+          {cat.verified&&<span style={{fontSize:7,color:"#00d68f",border:"1px solid #00d68f44",borderRadius:3,padding:"1px 5px"}}>VERIFIED</span>}
+          {cat.attention==="focus"&&<span style={{fontSize:7,color:"#f5c842",border:"1px solid #f5c84244",borderRadius:3,padding:"1px 5px"}}>FOCUS</span>}
+        </div>
+        <div style={{fontSize:11,color:"#d0d4f0",lineHeight:1.5,fontWeight:500}}>{cat.title||cat.headline}</div>
+        <div style={{fontSize:8,color:"var(--text2)",marginTop:3}}>{(cat.assets||[]).join(" · ")||"Sector-wide signal"}</div>
+      </div>
+
+      {/* Confidence */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+          <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>CONFIDENCE</span>
+          <span style={{fontSize:11,color:wc.color,fontWeight:600,fontFamily:"monospace"}}>{(cat.confidence||0).toFixed(1)}%</span>
+        </div>
+        <MiniBar value={cat.confidence||0} color={wc.color}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginTop:6}}>
+          <StatBox label="RENEWALS" value={cat.renewals||0} color="var(--text)"/>
+          <StatBox label="SOURCES" value={(cat.sources_count||cat.signal_count||signals.length)||1} color="var(--blue)"/>
+          <StatBox label="TYPE" value={(cat.type||"asset").toUpperCase()} color="var(--text2)"/>
+        </div>
+      </div>
+
+      {/* Wave progression */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+        <div className="section-label">WAVE STATE</div>
+        <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:6}}>
+          {["spark","confirmed","escalation","structural","regime"].map((ws,i)=>{
+            const wc2=WAVE_CFG[ws];
+            const isActive=ws===cat.wave;
+            const isPast=WAVE_ORDER_NUM[cat.wave]>WAVE_ORDER_NUM[ws];
+            return(
+              <React.Fragment key={ws}>
+                <div style={{flex:1,textAlign:"center",padding:"3px 2px",borderRadius:3,background:isActive?wc2.bg:isPast?"#ffffff08":"transparent",border:`1px solid ${isActive?wc2.color:isPast?"#ffffff15":"var(--border)"}`}}>
+                  <div style={{fontSize:5.5,letterSpacing:.3,color:isActive?wc2.color:isPast?"#ffffff25":"var(--text3)",fontWeight:isActive?700:400}}>{wc2.label}</div>
+                </div>
+                {i<4&&<div style={{width:4,height:1,background:isPast?"#ffffff15":"var(--border)",flexShrink:0}}/>}
+              </React.Fragment>
+            );
+          })}
+        </div>
+        {cat.wave_note&&<div style={{fontSize:8,color:"var(--text2)",lineHeight:1.5,fontStyle:"italic"}}>"{cat.wave_note}"</div>}
+      </div>
+
+      {/* Persona summary */}
+      {(persona.summary||cat.summary)&&(
+        <div style={{background:wc.bg,border:`1px solid ${wc.color}33`,borderRadius:5,padding:"8px 10px"}}>
+          <div className="section-label" style={{color:wc.color}}>INTELLIGENCE SUMMARY</div>
+          <div style={{fontSize:9,color:"#b0b4d0",lineHeight:1.6}}>{persona.summary||cat.summary}</div>
+          {persona.why_it_matters&&<div style={{fontSize:8,color:"var(--text2)",marginTop:5,lineHeight:1.5,borderTop:"1px solid var(--border)",paddingTop:5}}><span style={{color:"var(--text3)"}}>WHY IT MATTERS: </span>{persona.why_it_matters}</div>}
+          {(persona.what_to_watch||[]).length>0&&<div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:3}}>{persona.what_to_watch.map((w,i)=><span key={i} style={{fontSize:7,color:"var(--text2)",border:"1px solid var(--border)",borderRadius:3,padding:"1px 5px"}}>→ {w}</span>)}</div>}
+        </div>
+      )}
+
+      {/* Perplexity verification */}
+      {(verif.verdict||cat.verified)&&(()=>{
+        const vc={supported:"#00d68f",mixed:"#f5c842",weak:"#ff7a3d",contradicted:"#ff4d6a"}[verif.verdict]||"#6a6a9a";
+        return(
+          <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:`1px solid ${vc}22`}}>
+            <div className="section-label">PERPLEXITY VERIFICATION</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <span style={{fontSize:10,color:vc,fontWeight:600}}>{(verif.verdict||"verified").toUpperCase()}</span>
+              {verif.score!==undefined&&<span style={{fontSize:8,color:"var(--text3)"}}>score: {verif.score>0?"+":""}{(verif.score*100||0).toFixed(0)}</span>}
+            </div>
+            {verif.justification&&<div style={{fontSize:8,color:"#7a7a9a",lineHeight:1.5,marginBottom:5}}>{verif.justification}</div>}
+            {(verif.key_risks||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3}}>{verif.key_risks.map((r,i)=><span key={i} style={{fontSize:7,color:"#ff7a3d",border:"1px solid #ff7a3d22",borderRadius:3,padding:"1px 4px"}}>⚠ {r}</span>)}</div>}
+          </div>
+        );
+      })()}
+
+      {/* Signal chain */}
+      {signals.length>0&&(
+        <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+          <div className="section-label">SIGNAL CHAIN ({signals.length})</div>
+          {signals.map((s,i)=>{
+            const bc=BOT_COLORS[s.source||s.bot]||"#6a6a9a";
+            return(
+              <div key={i} className="signal-row">
+                <span className="bot-tag" style={{color:bc,borderColor:bc+"44"}}>{(s.source||s.bot||"BOT").replace("Bot","").toUpperCase()}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:8,color:"#b0b4d0",lineHeight:1.4}}>{s.summary||s.text||""}</div>
+                  <div style={{fontSize:7,color:"var(--text3)",marginTop:2}}>STR {s.strength||0} · {s.ts?new Date(s.ts*1000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}):"--:--"}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Scope */}
+      {((cat.assets||[]).length>0||(cat.sectors||[]).length>0)&&(
+        <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+          <div className="section-label">SCOPE</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+            {(cat.assets||[]).map(a=><span key={a} style={{fontSize:8,color:"var(--blue)",border:"1px solid var(--blue)22",borderRadius:3,padding:"1px 5px"}}>{a}</span>)}
+            {(cat.sectors||[]).map(s=><span key={s} style={{fontSize:8,color:"var(--text2)",border:"1px solid var(--border2)",borderRadius:3,padding:"1px 5px"}}>{s}</span>)}
+          </div>
+        </div>
+      )}
+
+      {/* Ask Sebastian */}
+      <button onClick={()=>onAskSebastian(cat)} className="btn btn-ask" style={{width:"100%",padding:"8px",fontSize:9}}>
+        Ask Sebastian about this catalyst →
+      </button>
+    </div>
+  );
+}
+
+function CatalystView({fmtMoney}){
+  const[catalysts,setCatalysts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[selected,setSelected]=useState(null);
+  const[filter,setFilter]=useState("all");
+  const[sebastianTarget,setSebastianTarget]=useState(null);
+
+  const load=useCallback(async()=>{
+    try{
+      const j=await api("/api/catalysts");
+      const cats=j.catalysts||j||[];
+      const wave_order={regime:5,structural:4,escalation:3,confirmed:2,spark:1};
+      cats.sort((a,b)=>(wave_order[b.wave]||0)-(wave_order[a.wave]||0)||(b.confidence||0)-(a.confidence||0));
+      setCatalysts(cats);
+    }catch(e){
+      setCatalysts([]);
+    }
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{load();},[]);
+  useEffect(()=>{const t=setInterval(load,15000);return()=>clearInterval(t);},[]);
+
+  const filtered=catalysts.filter(c=>{
+    if(filter==="focus")return c.attention==="focus";
+    if(filter==="high")return(c.confidence||0)>=65;
+    if(filter==="verified")return c.verified;
+    if(filter==="escalation")return["escalation","structural","regime"].includes(c.wave);
+    return true;
+  });
+
+  const waveCounts={spark:0,confirmed:0,escalation:0,structural:0,regime:0};
+  catalysts.forEach(c=>{if(waveCounts[c.wave]!==undefined)waveCounts[c.wave]++;});
+
+  return(
+    <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+      {sebastianTarget&&(
+        <SebastianPage
+          initialQuestion={`Tell me about this catalyst: ${sebastianTarget.title||sebastianTarget.headline}`}
+          initialContext={{catalyst:sebastianTarget}}
+          onClose={()=>setSebastianTarget(null)}
+          asModal
+        />
+      )}
+      {/* Left: catalyst list */}
+      <div style={{width:280,borderRight:"1px solid var(--border)",display:"flex",flexDirection:"column",flexShrink:0}}>
+        {/* Header */}
+        <div style={{padding:"8px 10px",borderBottom:"1px solid var(--border)",background:"var(--bg1)",flexShrink:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:8,color:"var(--text3)",letterSpacing:2}}>CATALYSTS</span>
+            <span style={{fontSize:9,color:"var(--text2)",fontFamily:"monospace"}}>{catalysts.length} active</span>
+          </div>
+          {/* Wave summary */}
+          <div style={{display:"flex",gap:3,marginBottom:6}}>
+            {Object.entries(waveCounts).filter(([,v])=>v>0).map(([wave,count])=>{
+              const wc=WAVE_CFG[wave];
+              return<div key={wave} style={{flex:1,textAlign:"center",background:wc.bg,border:`1px solid ${wc.color}44`,borderRadius:3,padding:"2px"}}>
+                <div style={{fontSize:8,color:wc.color,fontWeight:700}}>{count}</div>
+                <div style={{fontSize:5.5,color:wc.color,opacity:.7}}>{wc.label.slice(0,4)}</div>
+              </div>;
+            })}
+          </div>
+          {/* Filters */}
+          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+            {[["all","ALL"],["focus","FOCUS"],["escalation","ESC+"],["verified","✓ VER"],["high","HIGH"]].map(([v,l])=>(
+              <button key={v} className={`pill${filter===v?" active":""}`} onClick={()=>setFilter(v)} style={{fontSize:7,padding:"2px 6px"}}>{l}</button>
+            ))}
+          </div>
+        </div>
+        {/* List */}
+        <div style={{flex:1,overflowY:"auto",padding:6,display:"flex",flexDirection:"column",gap:4}}>
+          {loading&&<div style={{textAlign:"center",padding:20,color:"var(--text3)",fontSize:9}}>Loading catalysts...</div>}
+          {!loading&&filtered.length===0&&<div style={{textAlign:"center",padding:20,color:"var(--text3)",fontSize:9}}>No catalysts match this filter.</div>}
+          {filtered.map(cat=>(
+            <CatalystCard key={cat.id} cat={cat} selected={selected} onSelect={setSelected}/>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: detail or empty state */}
+      <div style={{flex:1,overflow:"hidden",background:"var(--bg1)"}}>
+        {selected?(
+          <div style={{height:"100%",display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"6px 10px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--bg2)",flexShrink:0}}>
+              <span style={{fontSize:7,color:"var(--text3)",letterSpacing:2}}>CATALYST DETAIL</span>
+              <button onClick={()=>setSelected(null)} style={{background:"none",border:"none",color:"var(--text3)",fontSize:14}}>×</button>
+            </div>
+            <CatalystDetail cat={selected} fmtMoney={fmtMoney} onAskSebastian={cat=>{setSebastianTarget(cat);}}/>
+          </div>
+        ):(
+          <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+            <div style={{fontSize:24,color:"var(--text3)"}}>◈</div>
+            <div style={{fontSize:9,color:"var(--text3)"}}>Select a catalyst to view detail</div>
+            <div style={{fontSize:8,color:"var(--text3)",opacity:.5}}>{catalysts.length} active · auto-refreshing</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN PAGE  (full dedicated view + modal mode)
+// ─────────────────────────────────────────────────────────────
+function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=false}){
+  const[messages,setMessages]=useState([]);
+  const[input,setInput]=useState(initialQuestion);
+  const[loading,setLoading]=useState(false);
+  const[mode,setMode]=useState("auto");
+  const bottomRef=useRef(null);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
+
+  // Auto-send if opened with initial question (from catalyst)
+  useEffect(()=>{
+    if(initialQuestion){
+      setMessages([]);
+      setTimeout(()=>sendMessage(initialQuestion),100);
+    }else{
+      setMessages([{role:"assistant",content:"Hi — I'm Sebastian, your Market Brain analyst.\n\nI have live prices and the current intelligence chain loaded. Ask me anything about the market, a specific asset, or what the bots are seeing right now.\n\nNot sure where to start? Try:\n• \"What's the strongest signal right now?\"\n• \"Walk me through the top catalyst\"\n• \"Which sector has the most activity?\""}]);
+    }
+  },[]);
+
+  const sendMessage=async(q)=>{
+    const question=(q||input).trim();
+    if(!question||loading)return;
+    setInput("");
+    const userMsg={role:"user",content:question};
+    setMessages(p=>[...p,userMsg]);
+    setLoading(true);
+    try{
+      const reply=await callSebastian(
+        question,
+        messages.slice(-10),
+        mode,
+        initialContext,
+      );
+      setMessages(p=>[...p,{role:"assistant",content:reply}]);
+    }catch(e){
+      setMessages(p=>[...p,{role:"assistant",content:`Sorry, I had trouble with that. Error: ${e.message||"unknown"}. Please try again.`}]);
+    }
+    setLoading(false);
+  };
+
+  const SUGGESTED=[
+    "What's the strongest signal right now?",
+    "Walk me through the top catalyst",
+    "Which sectors are most active?",
+    "Explain the current wave states",
+    "What should I be watching today?",
+    "Any cross-asset alignment?",
+  ];
+
+  const content=(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {/* Header */}
+      <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontSize:15,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>SEBASTIAN</div>
+          <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>Live prices · Intelligence chain · All catalysts loaded</div>
+        </div>
+        <div style={{display:"flex",gap:5,alignItems:"center"}}>
+          <div style={{display:"flex",border:"1px solid var(--border2)",borderRadius:4,overflow:"hidden"}}>
+            {[["auto","AUTO"],["beginner","SIMPLE"],["expert","EXPERT"]].map(([v,l])=>(
+              <button key={v} onClick={()=>setMode(v)} style={{background:mode===v?"var(--blue)22":"transparent",border:"none",padding:"3px 7px",color:mode===v?"var(--blue)":"var(--text3)",fontSize:7,letterSpacing:.5}}>{l}</button>
+            ))}
+          </div>
+          {onClose&&<button onClick={onClose} style={{background:"none",border:"none",color:"var(--text3)",fontSize:16,lineHeight:1}}>×</button>}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",padding:"10px 14px",display:"flex",flexDirection:"column",gap:7}}>
+        {messages.map((m,i)=>(
+          <div key={i} style={{
+            alignSelf:m.role==="user"?"flex-end":"flex-start",
+            maxWidth:"88%",
+            background:m.role==="user"?"#1e3a5f":"var(--bg3)",
+            border:`1px solid ${m.role==="user"?"var(--blue)33":"var(--border)"}`,
+            borderRadius:6,padding:"8px 10px",
+            animation:"fadeUp 0.15s ease",
+          }}>
+            <div style={{fontSize:7,color:m.role==="user"?"var(--blue)":"var(--text3)",letterSpacing:1,marginBottom:3}}>{m.role==="user"?"YOU":"SEBASTIAN"}</div>
+            <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>{m.content}</div>
+          </div>
+        ))}
+        {loading&&(
+          <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"8px 12px"}}>
+            <span style={{fontSize:9,color:"var(--text3)",animation:"pulse 1.2s infinite"}}>Sebastian is thinking...</span>
+          </div>
+        )}
+        <div ref={bottomRef}/>
+      </div>
+
+      {/* Suggested questions (only when few messages) */}
+      {messages.length<=2&&!loading&&(
+        <div style={{padding:"0 14px 6px",display:"flex",flexWrap:"wrap",gap:4,flexShrink:0}}>
+          {SUGGESTED.map(q=>(
+            <button key={q} onClick={()=>sendMessage(q)} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:4,padding:"4px 8px",color:"var(--text2)",fontSize:8,cursor:"pointer"}}>
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Input */}
+      <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",display:"flex",gap:6,flexShrink:0,background:"var(--bg1)"}}>
+        <input
+          className="input-dark"
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendMessage()}
+          placeholder="Ask Sebastian anything about the market..."
+          style={{flex:1}}
+        />
+        <button
+          onClick={()=>sendMessage()}
+          disabled={!input.trim()||loading}
+          style={{background:input.trim()&&!loading?"#1e3a5f":"var(--bg3)",border:`1px solid ${input.trim()&&!loading?"var(--blue)44":"var(--border)"}`,borderRadius:4,padding:"6px 12px",color:input.trim()&&!loading?"var(--blue)":"var(--text3)",fontSize:9,flexShrink:0}}
+        >
+          SEND →
+        </button>
+      </div>
+    </div>
+  );
+
+  if(asModal){
+    return(
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-box" style={{width:"100%",maxWidth:600,height:"78vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+          {content}
+        </div>
+      </div>
+    );
+  }
+  return content;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN MODAL  (from asset card — kept for asset context)
 // ─────────────────────────────────────────────────────────────
 function SebastianModal({asset,intel,fmtMoney,onClose}){
   const[messages,setMessages]=useState([]);
@@ -671,32 +1073,8 @@ function SebastianModal({asset,intel,fmtMoney,onClose}){
   const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
   const bottomRef=useRef(null);
 
-  const context=`You are Sebastian, the user-facing analyst for Market Brain. You help traders of ALL levels understand market opportunities clearly.
-
-Current asset: ${asset.ticker} (${asset.name}) — ${asset.sector}/${asset.sub}
-Price: ${fmtMoney(intel.price)} | Change: ${fmtPct(intel.changePct)}
-Wave State: ${intel.wave.toUpperCase()} | Confidence: ${intel.confidence}% | Intensity: ${intel.intensity}%
-Bias: ${intel.bias.toUpperCase()}
-
-Active bot signals:
-${intel.signals.map(s=>`- ${s.bot}: "${s.text}" (${(s.strength*100).toFixed(0)}% strength, ${s.bullish?"bullish":"bearish"})`).join("\n")}
-
-Perplexity verification: ${intel.perplexity.verdict} (score: ${intel.perplexity.score})
-${intel.perplexity.summary}
-
-Fundamentals: P/E ${intel.fundamentals.pe} | Debt/Equity ${intel.fundamentals.debtEquity} | Revenue Growth ${fmtPct(intel.fundamentals.revGrowth,0)}
-Technical: RSI ${intel.technical.rsi} | Volume ${intel.technical.volume}x average | MACD ${intel.technical.macd>0?"positive":"negative"}
-
-IMPORTANT RULES:
-- Always explain things simply first, then give the technical depth
-- Never tell someone to buy or sell — explain the picture and let them decide
-- Keep responses concise and structured
-- Use plain language for the first sentence of every explanation
-- Always mention: this is not financial advice`;
-
   useEffect(()=>{
-    // Auto first message
-    setMessages([{role:"assistant",content:`Hi! Let me break down what I'm seeing with **${asset.ticker}**.\n\n${intel.sbPrompt}\n\nHere's the quick picture:\n\n• **Wave state:** ${intel.wave.toUpperCase()} — ${WAVE_CFG[intel.wave]?.label}\n• **Confidence:** ${intel.confidence}% (${intel.confidence>=72?"strong":"developing"} signal)\n• **${intel.signals.length} intelligence sources** are active — ${intel.signals.filter(s=>s.bullish).length} pointing ${intel.bias}\n• **Perplexity check:** ${intel.perplexity.verdict} — ${intel.perplexity.summary}\n\nWhat would you like to understand better?`}]);
+    setMessages([{role:"assistant",content:`Hi! Let me break down what I'm seeing with **${asset.ticker}**.\n\n${intel.sbPrompt}\n\nHere's the quick picture:\n\n• **Wave state:** ${intel.wave.toUpperCase()} — ${WAVE_CFG[intel.wave]?.label}\n• **Confidence:** ${intel.confidence}% (${intel.confidence>=72?"strong":"developing"} signal)\n• **${intel.signals.length} intelligence sources** are active\n\nWhat would you like to understand better?`}]);
   },[]);
 
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
@@ -708,21 +1086,12 @@ IMPORTANT RULES:
     setInput("");
     setLoading(true);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          system:context,
-          messages:[...messages,userMsg].map(m=>({role:m.role,content:m.content})),
-        }),
-      });
-      const data=await res.json();
-      const reply=data.content?.find(b=>b.type==="text")?.text||"Sorry, I couldn't get a response right now.";
+      // Build asset context for Sebastian
+      const assetContext=`Current asset: ${asset.ticker} (${asset.name}) — ${asset.sector}/${asset.sub}\nPrice: ${fmtMoney(intel.price)} | Change: ${fmtPct(intel.changePct)}\nWave: ${intel.wave} | Confidence: ${intel.confidence}% | Bias: ${intel.bias}\nSignals: ${intel.signals.map(s=>`${s.bot}: ${s.text}`).join("; ")}`;
+      const reply=await callSebastian(input.trim(),messages.slice(-8),"auto",{asset_context:assetContext});
       setMessages(p=>[...p,{role:"assistant",content:reply}]);
-    }catch{
-      setMessages(p=>[...p,{role:"assistant",content:"I'm having trouble connecting right now. The intelligence data above is still valid — check the signals panel for the full picture."}]);
+    }catch(e){
+      setMessages(p=>[...p,{role:"assistant",content:`I had trouble with that request. Error: ${e.message}. Please try again.`}]);
     }
     setLoading(false);
   };
@@ -914,6 +1283,7 @@ function MainApp({user,onLogout}){
   const[showCurrModal,setShowCurrModal]=useState(false);
   const[sebastianTarget,setSebastianTarget]=useState(null);
   const[saving,setSaving]=useState(false);
+  const[activeView,setActiveView]=useState("intel"); // intel | catalysts | sebastian
   const sessionKeyRef=useRef(Date.now());
 
   // Load portfolio
@@ -1066,8 +1436,29 @@ function MainApp({user,onLogout}){
         </div>
       </div>
 
-      {/* ── FILTER BAR ── */}
-      <div style={{borderBottom:"1px solid var(--border)",padding:"5px 12px",background:"var(--bg1)",flexShrink:0}}>
+      {/* ── VIEW TABS ── */}
+      <div style={{borderBottom:"1px solid var(--border)",padding:"0 12px",display:"flex",gap:0,flexShrink:0,background:"var(--bg2)"}}>
+        {[
+          ["intel","◈ ASSETS"],
+          ["catalysts","◉ CATALYSTS"],
+          ["sebastian","◎ SEBASTIAN"],
+        ].map(([v,l])=>(
+          <button key={v} onClick={()=>setActiveView(v)} style={{
+            background:"transparent",
+            border:"none",
+            borderBottom:`2px solid ${activeView===v?"var(--blue)":"transparent"}`,
+            padding:"8px 14px",
+            color:activeView===v?"var(--blue)":"var(--text3)",
+            fontSize:9,
+            letterSpacing:1,
+            whiteSpace:"nowrap",
+            transition:"all 0.15s",
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── FILTER BAR (only for intel view) ── */}
+      {activeView==="intel"&&<div style={{borderBottom:"1px solid var(--border)",padding:"5px 12px",background:"var(--bg1)",flexShrink:0}}>
         <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
           {/* Search */}
           <input
@@ -1111,10 +1502,24 @@ function MainApp({user,onLogout}){
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
-      {/* ── MAIN GRID ── */}
-      <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+      {/* ── CATALYST VIEW ── */}
+      {activeView==="catalysts"&&(
+        <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+          <CatalystView fmtMoney={fmtMoney}/>
+        </div>
+      )}
+
+      {/* ── SEBASTIAN VIEW ── */}
+      {activeView==="sebastian"&&(
+        <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+          <SebastianPage/>
+        </div>
+      )}
+
+      {/* ── INTEL ASSET GRID ── */}
+      {activeView==="intel"&&<div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
 
         {/* Cards grid */}
         <div style={{flex:1,overflowY:"auto",padding:"8px 10px"}}>
@@ -1194,7 +1599,7 @@ function MainApp({user,onLogout}){
             />
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Status bar */}
       <div style={{borderTop:"1px solid var(--border)",padding:"3px 12px",display:"flex",gap:10,alignItems:"center",flexShrink:0,background:"var(--bg1)"}}>
