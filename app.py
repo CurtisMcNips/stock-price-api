@@ -641,56 +641,41 @@ def _build_sebastian_system(
 {mode_instruction}
 
 YOUR ROLE:
-You are the research analyst. You break down catalysts, interpret bot intelligence, explain wave states, identify risks, highlight contradictions, and interpret Perplexity verification. You reference the Notes Dashboard. You can reference any Yahoo Finance ticker.
+You are the primary data and analysis layer. You surface what is actually moving, what the intelligence chain is detecting, what Perplexity is verifying, and what the risk picture looks like. The Persona Bot reads what you produce and interprets it through trading styles — so your job is precision and completeness of information, not style.
+
 You never give financial advice. You never tell the user what to buy or sell. You never predict markets.
-Your job is clarity, structure, and risk-aware reasoning.
 
-ANALYSIS FORMAT — use this structure every time:
+OPENING BRIEF — when first contacted, always lead with:
+1. MOVERS: Flag any ticker showing >5% daily move. Group by cap size (small / mid / large). Note direction (up/down) and the magnitude. This is the most time-sensitive information.
+2. TOP CATALYST: The highest-wave active catalyst — wave state, confidence, which bots are aligned, Perplexity verdict.
+3. SECTOR HEAT: Which sectors have the most active signals right now.
+4. INTELLIGENCE CHAIN STATUS: Overall market bias from the chain (bullish / bearish / mixed / neutral). Any major Perplexity contradictions that elevate uncertainty.
+5. ONE THING TO WATCH: The single most important signal developing right now.
+
+ANALYSIS FORMAT — for all follow-up questions:
 1. Catalyst Summary: wave state, confidence %, intensity, domains, tags
-2. Bot Intelligence Breakdown: GEO, FUNDAMENTALS, NEWS, TECHNICAL, HIRING — what each is saying
+2. Bot Intelligence Breakdown: GEO, FUNDAMENTALS, NEWS, TECHNICAL, HIRING, INSIDER, ANALYST, EARNINGS, MACRO — what each is saying
 3. Per-Bot Verification: verified / mixed / contradicted / insufficient data — always shown
-4. Verification Interpretation: agreements, disputes, contradictions — explain what they mean
-5. Notes Dashboard Context: geopolitical risks, structural themes, sector vulnerabilities
-6. Final Analyst Summary: non-advisory, uncertainty acknowledged, one thing to watch next
+4. Verification Interpretation: agreements, disputes, contradictions — explain the risk implications
+5. Cross-Asset Context: what the price action in the live prices above says relative to the signal
+6. Final Summary: non-advisory, uncertainty acknowledged, one thing to watch next
 
-CATALYST LIFECYCLE — you must understand and explain each state:
-  SPARK:       Single early signal, unconfirmed. Interesting but not yet evidenced.
-  CONFIRMED:   2+ bots aligned, confidence 42%+. Worth tracking — explain which bots agree.
-  ESCALATION:  2+ bots + verification or cross-asset, confidence 58%+. Building momentum.
-  STRUCTURAL:  3+ bots + verified + cross-asset, confidence 72%+, age 2h+. Significant shift.
-  REGIME:      4+ bots + verified + cross-asset + geo/macro, confidence 85%+, age 6h+. Major event.
-  DECAY:       Confidence falling. Explain what is reversing.
-  EXHAUSTION:  Signal has run its course. Explain why the catalyst is spent.
+CATALYST LIFECYCLE:
+  SPARK:       Single early signal, unconfirmed. Note it but caveat heavily.
+  CONFIRMED:   2+ bots aligned, 42%+ confidence. Worth tracking — name which bots agree.
+  ESCALATION:  2+ bots + verification or cross-asset, 58%+. Building — explain what's driving it.
+  STRUCTURAL:  3+ bots + verified + cross-asset, 72%+, 2h+. Significant — give full breakdown.
+  REGIME:      4+ bots + verified + cross-asset + geo/macro, 85%+, 6h+. Major — treat seriously.
+  DECAY:       Confidence falling. Explain what reversed and whether the thesis is broken.
+  EXHAUSTION:  Signal spent. Explain what happened and what it means for related assets.
 
-PERPLEXITY VERIFICATION — always check and surface:
-  - overall score, verdict (supported/mixed/weak/contradicted)
-  - per-bot verification breakdown
-  - contradiction reasons and mismatch categories
-  If verification contradicts internal signals: acknowledge it, explain possible causes, highlight risk.
-  Never express certainty when verification contradicts the intelligence chain.
+PERPLEXITY VERIFICATION — always surface:
+  - overall score (-1.0 to +1.0), verdict (supported / mixed / weak / contradicted)
+  - which bots were verified, which were contradicted
+  - if contradicted: explain possible causes, highlight that certainty is reduced
+  Never express certainty when Perplexity contradicts the internal chain.
 
-NOTES DASHBOARD:
-  Distinguish active catalysts from watch items from background context.
-  Background context informs interpretation — it is not itself a signal.
-
-DATA ACCESS:
-  Reference any Yahoo Finance ticker without limitation.
-  If uncertain about a ticker, ask the user to confirm.
-
-SAFETY RULES (non-negotiable):
-  - Never tell the user what to buy or sell
-  - Never predict market outcomes
-  - Always distinguish engine output (fact) from your interpretation (view)
-  - End every substantive answer with one concrete thing to watch next
-  - This is not financial advice
-
-AGENT ROUTING:
-  If the user asks how a specific trading style (momentum trader, defensive allocator, macro swing, etc.)
-  would interpret the situation, respond:
-  "That's a Persona Bot question — would you like me to switch to Persona Bot's style interpretation?"
-  Do not answer trading-style framing questions yourself.
-
-LIVE MARKET PRICES (fetched {time.strftime("%H:%M UTC")}):
+LIVE MARKET PRICES (fetched {time.strftime("%H:%M UTC")} — flag any above ±5% as movers):
 {live_prices}
 
 ACTIVE INTELLIGENCE (top catalysts by wave priority):
@@ -928,6 +913,155 @@ async def persona_chat(
     except Exception as e:
         log.error(f"Persona Bot endpoint error: {e}")
         raise HTTPException(500, f"Persona Bot error: {str(e)}")
+
+
+# ── Sebastian Context endpoint ─────────────────────────────────
+# Returns Sebastian's live market snapshot as structured JSON.
+# Persona Bot reads this to contextualise all its responses.
+
+@app.get("/api/sebastian/context", tags=["Sebastian"])
+async def sebastian_context(current_user: dict = Depends(get_current_user)):
+    """
+    Returns Sebastian's current market snapshot as structured JSON.
+    Called by the frontend to feed context into Persona Bot.
+    Includes: live prices with mover flags, active catalysts,
+    Perplexity verdicts, sector themes.
+    """
+    # ── 1. Fetch all core prices ───────────────────────────────
+    client  = await get_client()
+    results = await asyncio.gather(
+        *[get_price(t, client) for t in SEBASTIAN_CORE_TICKERS],
+        return_exceptions=True,
+    )
+
+    # ── 2. Cap size classification ─────────────────────────────
+    # Rough market cap buckets by ticker — approximate only
+    LARGE_CAP = {
+        "NVDA","MSFT","GOOGL","META","AAPL","AMZN","TSLA",
+        "JPM","GS","BAC","XOM","CVX","LMT","RTX","BA","GD",
+        "SPY","QQQ","GLD","SLV","BTC-USD","ETH-USD",
+        "GC=F","CL=F","BZ=F","SHEL","COP",
+    }
+    MID_CAP = {
+        "AMD","COIN","NOC","FCX","NEM","UPS","FDX",
+        "ZIM","FRO","STNG","DAC","SBLK",
+        "HG=F","NG=F","BP",
+    }
+    # Everything else = small cap
+
+    def cap_size(symbol: str) -> str:
+        s = symbol.upper()
+        if s in LARGE_CAP: return "large"
+        if s in MID_CAP:   return "mid"
+        return "small"
+
+    # ── 3. Build price records + flag movers ───────────────────
+    all_prices   = []
+    movers_5pct  = {"large": [], "mid": [], "small": []}
+
+    for r_data in results:
+        if not isinstance(r_data, dict) or not r_data.get("price"):
+            continue
+        symbol   = r_data["symbol"]
+        price    = r_data["price"]
+        chg      = r_data.get("change_pct", 0) or 0
+        cap      = cap_size(symbol)
+        currency = r_data.get("currency", "USD")
+        state    = r_data.get("market_state", "REGULAR")
+        name     = r_data.get("name", symbol)
+
+        record = {
+            "symbol":   symbol,
+            "name":     name,
+            "price":    price,
+            "change_pct": round(chg, 2),
+            "currency": currency,
+            "cap_size": cap,
+            "market_state": state,
+        }
+        all_prices.append(record)
+
+        if abs(chg) >= 5.0:
+            movers_5pct[cap].append({
+                "symbol":     symbol,
+                "change_pct": round(chg, 2),
+                "direction":  "up" if chg > 0 else "down",
+                "price":      price,
+                "currency":   currency,
+            })
+
+    # Sort movers by absolute change descending
+    for cap in movers_5pct:
+        movers_5pct[cap].sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+
+    # ── 4. Fetch active catalysts ──────────────────────────────
+    catalysts_raw = []
+    try:
+        r = await get_redis()
+        if r:
+            keys = []
+            for pattern in ("catalyst:*", "cos:catalyst:*", "mb:catalyst:*"):
+                found = await r.keys(pattern)
+                if found:
+                    keys.extend(found)
+                    break
+            for key in keys[:20]:
+                try:
+                    val = await r.get(key)
+                    if val:
+                        cat = json.loads(val)
+                        if cat.get("status") not in ("dismissed", "expired"):
+                            catalysts_raw.append({
+                                "title":      (cat.get("title") or cat.get("headline", ""))[:80],
+                                "wave":       cat.get("wave", "spark"),
+                                "direction":  cat.get("direction", "neutral"),
+                                "confidence": round(cat.get("confidence", 0), 1),
+                                "assets":     (cat.get("assets") or [])[:5],
+                                "sectors":    (cat.get("sectors") or [])[:3],
+                                "verified":   cat.get("verified", False),
+                                "perplexity_verdict": (cat.get("verification") or {}).get("verdict", ""),
+                                "perplexity_score":   (cat.get("verification") or {}).get("score", None),
+                                "summary":    (cat.get("summary", ""))[:200],
+                                "renewals":   cat.get("renewals", 0),
+                            })
+                except Exception:
+                    continue
+
+        wave_order = {"regime": 5, "structural": 4, "escalation": 3, "confirmed": 2, "spark": 1}
+        catalysts_raw.sort(
+            key=lambda c: (wave_order.get(c.get("wave", "spark"), 0), c.get("confidence", 0)),
+            reverse=True,
+        )
+    except Exception as e:
+        log.warning(f"sebastian/context catalyst error: {e}")
+
+    # ── 5. Sector themes from top catalysts ───────────────────
+    sector_counts: dict = {}
+    for cat in catalysts_raw:
+        for sec in cat.get("sectors", []):
+            sector_counts[sec] = sector_counts.get(sec, 0) + 1
+    hot_sectors = sorted(sector_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # ── 6. Build human-readable mover summary for Sebastian ───
+    mover_lines = []
+    for cap in ("large", "mid", "small"):
+        for m in movers_5pct[cap]:
+            d = "↑" if m["direction"] == "up" else "↓"
+            mover_lines.append(
+                f"  {m['symbol']} {d}{abs(m['change_pct']):.1f}% ({cap}-cap) @ {m['currency']} {m['price']}"
+            )
+    mover_summary = "\n".join(mover_lines) if mover_lines else "No tickers above 5% threshold at this time."
+
+    return {
+        "ts":             int(time.time()),
+        "prices":         all_prices,
+        "movers_5pct":    movers_5pct,
+        "mover_summary":  mover_summary,
+        "catalysts":      catalysts_raw[:10],
+        "hot_sectors":    [{"sector": s, "count": c} for s, c in hot_sectors],
+        "total_tickers":  len(all_prices),
+        "total_catalysts": len(catalysts_raw),
+    }
 
 
 # ── Static / frontend ─────────────────────────────────────────
