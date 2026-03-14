@@ -956,172 +956,246 @@ function CatalystView({fmtMoney}){
 // ─────────────────────────────────────────────────────────────
 //  SEBASTIAN PAGE  (full dedicated view + modal mode)
 // ─────────────────────────────────────────────────────────────
-function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=false}){
+// ─────────────────────────────────────────────────────────────
+//  CHAT PANE  — reusable for Sebastian or Persona Bot
+// ─────────────────────────────────────────────────────────────
+function ChatPane({
+  agentKey,          // "sebastian" | "persona"
+  label,             // "SEBASTIAN" | "PERSONA BOT"
+  accentColor,       // var(--blue) | var(--purple)
+  callFn,            // callSebastian | callPersona
+  openingQuestion,   // string sent on mount to get the brief
+  suggestedQuestions,
+  mode,
+  initialContext={},
+}){
   const[messages,setMessages]=useState([]);
-  const[input,setInput]=useState(initialQuestion);
+  const[input,setInput]=useState("");
   const[loading,setLoading]=useState(false);
-  const[mode,setMode]=useState("auto");
-  const[agent,setAgent]=useState("auto"); // auto | sebastian | persona
   const bottomRef=useRef(null);
-
-  const AGENT_CFG={
-    sebastian:{label:"SEBASTIAN",color:"var(--blue)",desc:"Analyst · Catalyst breakdown · Signal interpretation"},
-    persona:{label:"PERSONA BOT",color:"var(--purple)",desc:"Trading-style interpreter · How different traders see it"},
-    auto:{label:"AUTO",color:"var(--text3)",desc:"Routes automatically based on your question"},
-  };
 
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
 
-  // Auto-send if opened with initial question (from catalyst)
+  // Auto-fetch opening brief on mount
   useEffect(()=>{
-    if(initialQuestion){
-      setMessages([]);
-      setTimeout(()=>sendMessage(initialQuestion),100);
-    }else{
-      // Auto-fetch landscape brief on open
     setLoading(true);
-    callSebastian(
-      "Give me a concise intelligence landscape overview right now. Cover: (1) the highest-wave catalyst and what's driving it, (2) which sectors are most active, (3) the overall market direction bias, and (4) the top 2-3 assets I should be watching. Keep it tight — 4-5 short paragraphs.",
-      [],
-      mode,
-      {},
-    ).then(result=>{
-      const reply=typeof result==="string"?result:result.response;
-      setMessages([{role:"assistant",content:reply,agent:"sebastian"}]);
-      setLoading(false);
-    }).catch(()=>{
-      setMessages([{role:"assistant",content:"Hi — I'm Sebastian. I have live prices and the full intelligence chain loaded.\n\nAsk me anything about the market, a specific catalyst, or what the bots are seeing right now."}]);
-      setLoading(false);
-    });
-    }
+    callFn(openingQuestion,[],mode,initialContext)
+      .then(result=>{
+        const reply=typeof result==="string"?result:result.response;
+        setMessages([{role:"assistant",content:reply}]);
+        setLoading(false);
+      })
+      .catch(()=>{
+        setMessages([{role:"assistant",content:agentKey==="sebastian"
+          ?"I have live prices and the intelligence chain loaded. Ask me anything about the market."
+          :"I'm ready to interpret the current situation through any trading style. What perspective would you like?"}]);
+        setLoading(false);
+      });
   },[]);
 
-  const sendMessage=async(q)=>{
+  const send=async(q)=>{
     const question=(q||input).trim();
     if(!question||loading)return;
     setInput("");
-    const userMsg={role:"user",content:question};
-    setMessages(p=>[...p,userMsg]);
+    setMessages(p=>[...p,{role:"user",content:question}]);
     setLoading(true);
     try{
-      // Route to the correct endpoint based on agent selector or auto-detection
-      const activeAgent=detectAgent(question,agent);
-      const callFn=activeAgent==="persona"?callPersona:callSebastian;
-      const result=await callFn(
-        question,
-        messages.slice(-10),
-        mode,
-        initialContext,
-      );
-      setMessages(p=>[...p,{role:"assistant",content:result.response,agent:result.agent}]);
+      const result=await callFn(question,messages.slice(-10),mode,initialContext);
+      const reply=typeof result==="string"?result:result.response;
+      setMessages(p=>[...p,{role:"assistant",content:reply}]);
     }catch(e){
-      setMessages(p=>[...p,{role:"assistant",content:`Sorry, I had trouble with that. Error: ${e.message||"unknown"}. Please try again.`,agent:"sebastian"}]);
+      setMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message||"unknown"}. Please try again.`}]);
     }
     setLoading(false);
   };
 
-  const SUGGESTED=[
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
+
+      {/* Pane header */}
+      <div style={{
+        padding:"8px 12px",
+        borderBottom:`1px solid ${accentColor}33`,
+        background:"var(--bg2)",
+        flexShrink:0,
+      }}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:accentColor,letterSpacing:1.5}}>
+          {label}
+        </div>
+        <div style={{fontSize:7,color:"var(--text3)",marginTop:1,letterSpacing:.5}}>
+          {agentKey==="sebastian"
+            ?"Analyst · Catalyst breakdown · Wave states · Verification · Risk framing"
+            :"Trading-style interpreter · How different traders read this market"}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:7}}>
+        {messages.map((m,i)=>(
+          <div key={i} style={{
+            alignSelf:m.role==="user"?"flex-end":"flex-start",
+            maxWidth:"90%",
+            background:m.role==="user"?"#1a2a40":"var(--bg3)",
+            border:`1px solid ${m.role==="user"?accentColor+"44":"var(--border)"}`,
+            borderRadius:6,
+            padding:"7px 10px",
+            animation:"fadeUp 0.15s ease",
+          }}>
+            <div style={{fontSize:7,color:m.role==="user"?"var(--blue)":accentColor,letterSpacing:1,marginBottom:3}}>
+              {m.role==="user"?"YOU":label}
+            </div>
+            <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
+              {m.content}
+            </div>
+          </div>
+        ))}
+        {loading&&(
+          <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"7px 12px"}}>
+            <span style={{fontSize:9,color:accentColor,animation:"pulse 1.2s infinite"}}>
+              {label} is thinking...
+            </span>
+          </div>
+        )}
+        <div ref={bottomRef}/>
+      </div>
+
+      {/* Suggested questions */}
+      {messages.length<=2&&!loading&&(
+        <div style={{padding:"0 12px 5px",display:"flex",flexWrap:"wrap",gap:3,flexShrink:0}}>
+          {suggestedQuestions.map(q=>(
+            <button key={q} onClick={()=>send(q)} style={{
+              background:"var(--bg3)",border:`1px solid ${accentColor}33`,
+              borderRadius:4,padding:"3px 7px",
+              color:accentColor,fontSize:7.5,cursor:"pointer",
+            }}>{q}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Input */}
+      <div style={{padding:"7px 10px",borderTop:"1px solid var(--border)",display:"flex",gap:5,flexShrink:0,background:"var(--bg1)"}}>
+        <input
+          className="input-dark"
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()}
+          placeholder={agentKey==="sebastian"
+            ?"Ask Sebastian about catalysts, signals, wave states..."
+            :"Ask how a momentum trader / macro swing trader / contrarian would read this..."}
+          style={{flex:1,fontSize:9}}
+        />
+        <button
+          onClick={()=>send()}
+          disabled={!input.trim()||loading}
+          style={{
+            background:input.trim()&&!loading?accentColor+"22":"var(--bg3)",
+            border:`1px solid ${input.trim()&&!loading?accentColor+"55":"var(--border)"}`,
+            borderRadius:4,padding:"5px 11px",
+            color:input.trim()&&!loading?accentColor:"var(--text3)",
+            fontSize:8,flexShrink:0,
+          }}
+        >SEND →</button>
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN PAGE — split pane: Sebastian left, Persona Bot right
+// ─────────────────────────────────────────────────────────────
+function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=false}){
+  const[mode,setMode]=useState("auto");
+
+  const SEBASTIAN_OPENING = initialQuestion ||
+    "Give me a concise intelligence landscape overview right now. Cover: (1) the highest-wave catalyst and what's driving it, (2) which sectors are most active, (3) the overall market direction bias, and (4) the top 2-3 assets I should be watching. Keep it tight — 4-5 short paragraphs.";
+
+  const PERSONA_OPENING =
+    "Give me a brief overview of the current market landscape interpreted through multiple trading styles. Cover: how a momentum trader would read the top catalyst, how a macro swing trader views the current sector rotation, and what a contrarian would flag about the highest-confidence signals. Keep it tight — one paragraph per style.";
+
+  const SEBASTIAN_SUGGESTED=[
     "What's the strongest signal right now?",
     "Walk me through the top catalyst",
     "Which sectors are most active?",
     "Explain the current wave states",
-    "What should I be watching today?",
-    "Any cross-asset alignment?",
+    "Any Perplexity contradictions I should know about?",
+    "What's the cross-asset alignment telling us?",
   ];
 
-  const content=(
+  const PERSONA_SUGGESTED=[
+    "How would a momentum trader read this?",
+    "How would a defensive allocator view this?",
+    "How would a macro swing trader approach this?",
+    "How would a contrarian interpret the top signal?",
+    "How would a geopolitical risk trader read current Defence?",
+    "How would an event-driven trader position around this?",
+  ];
+
+  const pageContent=(
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      {/* Header */}
-      <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
-        <div>
-          <div style={{fontFamily:"'Barlow Condensed'",fontSize:15,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>SEBASTIAN</div>
-          <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>
-            {agent==="persona"?"Persona Bot · "+AGENT_CFG.persona.desc
-             :agent==="sebastian"?"Sebastian · "+AGENT_CFG.sebastian.desc
-             :"Auto-routing · Live prices · Intelligence chain"}
+
+      {/* Top bar */}
+      <div style={{
+        padding:"7px 14px",
+        borderBottom:"1px solid var(--border2)",
+        display:"flex",justifyContent:"space-between",alignItems:"center",
+        flexShrink:0,background:"var(--bg2)",
+      }}>
+        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>
+            INTELLIGENCE CHAT
+          </div>
+          <div style={{fontSize:7,color:"var(--text3)"}}>
+            Two independent agents · Same live data · Ask them both
           </div>
         </div>
-        <div style={{display:"flex",gap:5,alignItems:"center"}}>
-          {/* Agent selector */}
-          <div style={{display:"flex",gap:3}}>
-            {[["auto","AUTO"],["sebastian","SEBASTIAN"],["persona","PERSONA"]].map(([v,l])=>{
-              const ac=AGENT_CFG[v]||AGENT_CFG.auto;
-              return(
-                <button key={v} onClick={()=>setAgent(v)} style={{
-                  background:agent===v?ac.color+"22":"transparent",
-                  border:`1px solid ${agent===v?ac.color+"55":"var(--border)"}`,
-                  borderRadius:4,padding:"3px 8px",
-                  color:agent===v?ac.color:"var(--text3)",
-                  fontSize:7,letterSpacing:.5
-                }}>{l}</button>
-              );
-            })}
-          </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
           {/* Mode selector */}
           <div style={{display:"flex",border:"1px solid var(--border2)",borderRadius:4,overflow:"hidden"}}>
             {[["auto","AUTO"],["beginner","SIMPLE"],["expert","EXPERT"]].map(([v,l])=>(
-              <button key={v} onClick={()=>setMode(v)} style={{background:mode===v?"var(--blue)22":"transparent",border:"none",padding:"3px 7px",color:mode===v?"var(--blue)":"var(--text3)",fontSize:7,letterSpacing:.5}}>{l}</button>
+              <button key={v} onClick={()=>setMode(v)} style={{
+                background:mode===v?"var(--blue)22":"transparent",
+                border:"none",padding:"3px 8px",
+                color:mode===v?"var(--blue)":"var(--text3)",
+                fontSize:7,letterSpacing:.5
+              }}>{l}</button>
             ))}
           </div>
           {onClose&&<button onClick={onClose} style={{background:"none",border:"none",color:"var(--text3)",fontSize:16,lineHeight:1}}>×</button>}
         </div>
       </div>
 
-      {/* Messages */}
-      <div style={{flex:1,overflowY:"auto",padding:"10px 14px",display:"flex",flexDirection:"column",gap:7}}>
-        {messages.map((m,i)=>(
-          <div key={i} style={{
-            alignSelf:m.role==="user"?"flex-end":"flex-start",
-            maxWidth:"88%",
-            background:m.role==="user"?"#1e3a5f":"var(--bg3)",
-            border:`1px solid ${m.role==="user"?"var(--blue)33":"var(--border)"}`,
-            borderRadius:6,padding:"8px 10px",
-            animation:"fadeUp 0.15s ease",
-          }}>
-            {(()=>{
-              if(m.role==="user") return <div style={{fontSize:7,color:"var(--blue)",letterSpacing:1,marginBottom:3}}>YOU</div>;
-              const ac=AGENT_CFG[m.agent||"sebastian"]||AGENT_CFG.sebastian;
-              return <div style={{fontSize:7,color:ac.color,letterSpacing:1,marginBottom:3}}>{ac.label}</div>;
-            })()}
-            <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>{m.content}</div>
-          </div>
-        ))}
-        {loading&&(
-          <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"8px 12px"}}>
-            <span style={{fontSize:9,color:"var(--text3)",animation:"pulse 1.2s infinite"}}>Sebastian is thinking...</span>
-          </div>
-        )}
-        <div ref={bottomRef}/>
-      </div>
+      {/* Split pane */}
+      <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",gap:0,overflow:"hidden",minHeight:0}}>
 
-      {/* Suggested questions (only when few messages) */}
-      {messages.length<=2&&!loading&&(
-        <div style={{padding:"0 14px 6px",display:"flex",flexWrap:"wrap",gap:4,flexShrink:0}}>
-          {SUGGESTED.map(q=>(
-            <button key={q} onClick={()=>sendMessage(q)} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:4,padding:"4px 8px",color:"var(--text2)",fontSize:8,cursor:"pointer"}}>
-              {q}
-            </button>
-          ))}
+        {/* LEFT — Sebastian */}
+        <div style={{borderRight:"1px solid var(--border2)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          <ChatPane
+            agentKey="sebastian"
+            label="SEBASTIAN"
+            accentColor="var(--blue)"
+            callFn={callSebastian}
+            openingQuestion={SEBASTIAN_OPENING}
+            suggestedQuestions={SEBASTIAN_SUGGESTED}
+            mode={mode}
+            initialContext={initialContext}
+          />
         </div>
-      )}
 
-      {/* Input */}
-      <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",display:"flex",gap:6,flexShrink:0,background:"var(--bg1)"}}>
-        <input
-          className="input-dark"
-          value={input}
-          onChange={e=>setInput(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendMessage()}
-          placeholder="Ask Sebastian anything about the market..."
-          style={{flex:1}}
-        />
-        <button
-          onClick={()=>sendMessage()}
-          disabled={!input.trim()||loading}
-          style={{background:input.trim()&&!loading?"#1e3a5f":"var(--bg3)",border:`1px solid ${input.trim()&&!loading?"var(--blue)44":"var(--border)"}`,borderRadius:4,padding:"6px 12px",color:input.trim()&&!loading?"var(--blue)":"var(--text3)",fontSize:9,flexShrink:0}}
-        >
-          SEND →
-        </button>
+        {/* RIGHT — Persona Bot */}
+        <div style={{overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          <ChatPane
+            agentKey="persona"
+            label="PERSONA BOT"
+            accentColor="var(--purple)"
+            callFn={callPersona}
+            openingQuestion={PERSONA_OPENING}
+            suggestedQuestions={PERSONA_SUGGESTED}
+            mode={mode}
+            initialContext={initialContext}
+          />
+        </div>
+
       </div>
     </div>
   );
@@ -1129,14 +1203,15 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
   if(asModal){
     return(
       <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-box" style={{width:"100%",maxWidth:600,height:"78vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
-          {content}
+        <div className="modal-box" style={{width:"96%",maxWidth:1100,height:"82vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+          {pageContent}
         </div>
       </div>
     );
   }
-  return content;
+  return pageContent;
 }
+
 
 // ─────────────────────────────────────────────────────────────
 //  SEBASTIAN MODAL  (from asset card — kept for asset context)
