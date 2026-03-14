@@ -1,0 +1,1932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Market Brain v7</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Barlow+Condensed:wght@400;600;700;900&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#020207;color:#c8cce8;font-family:'IBM Plex Mono',monospace;height:100vh;overflow:hidden;font-size:11px;}
+:root{
+  --bg0:#020207;--bg1:#05050f;--bg2:#08081a;--bg3:#0d0d22;
+  --border:#111128;--border2:#1a1a35;
+  --text:#c8cce8;--text2:#6a6a9a;--text3:#2e2e50;
+  --blue:#3d9eff;--green:#00d68f;--red:#ff4d6a;--yellow:#f5c842;--orange:#ff7a3d;--purple:#a78bfa;
+}
+::-webkit-scrollbar{width:3px;height:3px;}
+::-webkit-scrollbar-track{background:var(--bg1);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes slidein{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+.card-enter{animation:fadeUp 0.18s ease forwards;}
+input,button{font-family:inherit;outline:none;}
+button{cursor:pointer;}
+
+/* ── WAVE BADGE COLOURS ── */
+.wave-spark{color:#888;border-color:#33333a;}
+.wave-confirmed{color:var(--blue);border-color:#1e3a5f;}
+.wave-escalation{color:var(--yellow);border-color:#3d3010;}
+.wave-structural{color:var(--orange);border-color:#3d1a08;}
+.wave-regime{color:var(--red);border-color:#3d0818;}
+
+/* ── BIAS ── */
+.bias-bullish{color:var(--green);}
+.bias-bearish{color:var(--red);}
+.bias-neutral{color:var(--text2);}
+
+/* ── CARD ── */
+.intel-card{
+  background:var(--bg1);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:8px 9px;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+  transition:border-color 0.15s, background 0.15s;
+}
+.intel-card:hover{border-color:var(--border2);background:var(--bg2);}
+.intel-card.selected{border-color:var(--blue);background:var(--bg2);}
+.intel-card .accent-bar{position:absolute;top:0;left:0;right:0;height:1.5px;}
+
+/* ── BAR ── */
+.bar-track{height:2px;background:var(--bg3);border-radius:1px;overflow:hidden;}
+.bar-fill{height:100%;border-radius:1px;}
+
+/* ── BTN ── */
+.btn{border-radius:4px;padding:4px 8px;font-size:9px;letter-spacing:.5px;border:1px solid;transition:all 0.15s;}
+.btn-watch{background:transparent;border-color:#2a2a45;color:var(--text2);}
+.btn-watch:hover{border-color:var(--yellow);color:var(--yellow);}
+.btn-watch.active{border-color:var(--yellow);color:var(--yellow);background:#f5c84210;}
+.btn-ask{background:transparent;border-color:#1e3a5f;color:var(--blue);}
+.btn-ask:hover{background:#3d9eff18;border-color:var(--blue);}
+.btn-sm{padding:3px 7px;font-size:8px;}
+
+/* ── PILL ── */
+.pill{border:1px solid var(--border2);border-radius:10px;padding:2px 8px;font-size:8px;letter-spacing:.5px;cursor:pointer;white-space:nowrap;background:transparent;color:var(--text3);transition:all 0.12s;}
+.pill.active{background:var(--bg3);color:var(--text);}
+.pill:hover:not(.active){color:var(--text2);}
+
+/* ── PANEL ── */
+.detail-panel{animation:slidein 0.2s ease;}
+.section-label{font-size:7px;letter-spacing:2px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:#000000cc;z-index:600;display:flex;align-items:center;justify-content:center;padding:12px;}
+.modal-box{background:var(--bg1);border:1px solid var(--border2);border-radius:8px;max-height:92vh;overflow-y:auto;}
+
+/* ── INPUT ── */
+.input-dark{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:6px 9px;color:var(--text);font-size:11px;font-family:inherit;width:100%;}
+.input-dark::placeholder{color:var(--text3);}
+.input-dark:focus{border-color:var(--blue);}
+
+/* ── STAT BOX ── */
+.stat-box{background:var(--bg2);border-radius:4px;padding:6px 8px;text-align:center;}
+.stat-box .label{font-size:6px;color:var(--text3);letter-spacing:1.5px;margin-bottom:2px;}
+.stat-box .value{font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace;}
+
+/* ── SIGNAL ROW ── */
+.signal-row{padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start;}
+.signal-row:last-child{border-bottom:none;}
+.bot-tag{font-size:7px;letter-spacing:1px;border:1px solid;border-radius:3px;padding:1px 4px;white-space:nowrap;flex-shrink:0;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useRef,useMemo}=React;
+
+// ─────────────────────────────────────────────────────────────
+//  API
+// ─────────────────────────────────────────────────────────────
+const API="";
+const api=async(path,opts={})=>{
+  const token=localStorage.getItem("mb_token");
+  const headers={"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})};
+  const res=await fetch(API+path,{headers,...opts});
+  const j=await res.json();
+  if(!res.ok)throw new Error(j.detail||"Request failed");
+  return j;
+};
+async function fetchLivePrices(tickers){
+  try{
+    const chunks=[];for(let i=0;i<tickers.length;i+=40)chunks.push(tickers.slice(i,i+40));
+    const results={};
+    for(const chunk of chunks){const j=await api(`/api/prices?symbols=${chunk.join(",")}`);Object.assign(results,j.data||{});}
+    return Object.keys(results).length?results:null;
+  }catch{return null;}
+}
+async function fetchFxRates(){
+  try{
+    const pairs="GBPUSD=X,GBPEUR=X,GBPJPY=X,GBPCAD=X,GBPAUD=X,GBPCHF=X";
+    const j=await api(`/api/prices?symbols=${pairs}`);
+    if(!j.data)return null;
+    const rates={GBP:1.0};
+    const map={"GBPUSD=X":"USD","GBPEUR=X":"EUR","GBPJPY=X":"JPY","GBPCAD=X":"CAD","GBPAUD=X":"AUD","GBPCHF=X":"CHF"};
+    Object.entries(map).forEach(([sym,code])=>{const d=j.data[sym];if(d?.price)rates[code]=parseFloat(d.price);});
+    return rates;
+  }catch{return null;}
+}
+
+// ─────────────────────────────────────────────────────────────
+//  STATIC DATA
+// ─────────────────────────────────────────────────────────────
+const CURRENCIES=[
+  {code:"GBP",symbol:"£",flag:"🇬🇧",fb:1.00},
+  {code:"USD",symbol:"$",flag:"🇺🇸",fb:1.27},
+  {code:"EUR",symbol:"€",flag:"🇪🇺",fb:1.17},
+  {code:"JPY",symbol:"¥",flag:"🇯🇵",fb:192.5},
+  {code:"CAD",symbol:"C$",flag:"🇨🇦",fb:1.72},
+  {code:"AUD",symbol:"A$",flag:"🇦🇺",fb:1.95},
+  {code:"CHF",symbol:"Fr",flag:"🇨🇭",fb:1.13},
+];
+
+const ASSETS=[
+  {ticker:"ZIM",name:"ZIM Shipping",sector:"Shipping",sub:"Container",cap:"Mid"},
+  {ticker:"MATX",name:"Matson Inc",sector:"Shipping",sub:"Container",cap:"Mid"},
+  {ticker:"DAC",name:"Danaos Corp",sector:"Shipping",sub:"Container",cap:"Small"},
+  {ticker:"LMT",name:"Lockheed Martin",sector:"Defence",sub:"Aerospace",cap:"Large"},
+  {ticker:"RTX",name:"Raytheon Tech",sector:"Defence",sub:"Missiles",cap:"Large"},
+  {ticker:"NOC",name:"Northrop Grumman",sector:"Defence",sub:"Systems",cap:"Large"},
+  {ticker:"BA",name:"Boeing",sector:"Defence",sub:"Aircraft",cap:"Large"},
+  {ticker:"BAE.L",name:"BAE Systems",sector:"Defence",sub:"Land Systems",cap:"Large"},
+  {ticker:"QQE.L",name:"Qinetiq Group",sector:"Defence",sub:"R&D",cap:"Mid"},
+  {ticker:"XOM",name:"ExxonMobil",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"BP",name:"BP plc",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"CVX",name:"Chevron",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"TTE",name:"TotalEnergies",sector:"Energy",sub:"Oil & Gas",cap:"Large"},
+  {ticker:"BW",name:"BW LPG",sector:"Energy",sub:"LNG Shipping",cap:"Small"},
+  {ticker:"MRO",name:"Marathon Oil",sector:"Energy",sub:"Upstream",cap:"Mid"},
+  {ticker:"MU",name:"Micron Tech",sector:"Technology",sub:"Memory",cap:"Large"},
+  {ticker:"NVDA",name:"NVIDIA",sector:"Technology",sub:"Semiconductors",cap:"Large"},
+  {ticker:"AMD",name:"AMD",sector:"Technology",sub:"Semiconductors",cap:"Large"},
+  {ticker:"INTC",name:"Intel",sector:"Technology",sub:"Semiconductors",cap:"Large"},
+  {ticker:"CRWD",name:"CrowdStrike",sector:"Technology",sub:"Cybersecurity",cap:"Large"},
+  {ticker:"PANW",name:"Palo Alto",sector:"Technology",sub:"Cybersecurity",cap:"Large"},
+  {ticker:"MSFT",name:"Microsoft",sector:"Technology",sub:"Software",cap:"Large"},
+  {ticker:"GOOGL",name:"Alphabet",sector:"Technology",sub:"Software",cap:"Large"},
+  {ticker:"GLD",name:"SPDR Gold ETF",sector:"Metals",sub:"Gold",cap:"Large"},
+  {ticker:"GFI",name:"Gold Fields",sector:"Metals",sub:"Gold Miners",cap:"Mid"},
+  {ticker:"FCX",name:"Freeport-McMoRan",sector:"Metals",sub:"Copper",cap:"Large"},
+  {ticker:"NUE",name:"Nucor Steel",sector:"Metals",sub:"Steel",cap:"Large"},
+  {ticker:"LAC",name:"Lithium Americas",sector:"Minerals",sub:"Lithium",cap:"Small"},
+  {ticker:"ALB",name:"Albemarle",sector:"Minerals",sub:"Lithium",cap:"Mid"},
+  {ticker:"UEC",name:"Uranium Energy",sector:"Minerals",sub:"Uranium",cap:"Small"},
+  {ticker:"BHP",name:"BHP Group",sector:"Minerals",sub:"Mining",cap:"Large"},
+  {ticker:"RIO",name:"Rio Tinto",sector:"Minerals",sub:"Mining",cap:"Large"},
+  {ticker:"VALE",name:"Vale SA",sector:"Minerals",sub:"Iron Ore",cap:"Large"},
+  {ticker:"UNH",name:"UnitedHealth",sector:"Insurance",sub:"Health",cap:"Large"},
+  {ticker:"AIG",name:"AIG",sector:"Insurance",sub:"P&C",cap:"Large"},
+  {ticker:"MKL",name:"Markel Corp",sector:"Insurance",sub:"Specialty",cap:"Mid"},
+  {ticker:"JPM",name:"JPMorgan Chase",sector:"Finance",sub:"Banking",cap:"Large"},
+  {ticker:"GS",name:"Goldman Sachs",sector:"Finance",sub:"Banking",cap:"Large"},
+  {ticker:"V",name:"Visa",sector:"Finance",sub:"Payments",cap:"Large"},
+  {ticker:"BTC-USD",name:"Bitcoin",sector:"Crypto",sub:"Layer 1",cap:"Large"},
+  {ticker:"ETH-USD",name:"Ethereum",sector:"Crypto",sub:"Layer 1",cap:"Large"},
+  {ticker:"COIN",name:"Coinbase",sector:"Crypto",sub:"Exchange",cap:"Mid"},
+  {ticker:"AMZN",name:"Amazon",sector:"Logistics",sub:"E-Commerce",cap:"Large"},
+  {ticker:"UPS",name:"UPS",sector:"Logistics",sub:"Delivery",cap:"Large"},
+  {ticker:"FDX",name:"FedEx",sector:"Logistics",sub:"Delivery",cap:"Large"},
+  {ticker:"TSLA",name:"Tesla",sector:"Consumer",sub:"EV",cap:"Large"},
+  {ticker:"NKE",name:"Nike",sector:"Consumer",sub:"Apparel",cap:"Large"},
+  {ticker:"EURUSD=X",name:"EUR/USD",sector:"Forex",sub:"Major",cap:"Large"},
+  {ticker:"GBPUSD=X",name:"GBP/USD",sector:"Forex",sub:"Major",cap:"Large"},
+  {ticker:"USDJPY=X",name:"USD/JPY",sector:"Forex",sub:"Major",cap:"Large"},
+];
+
+const WAVE_STATES=["spark","confirmed","escalation","structural","regime"];
+const WAVE_CFG={
+  spark:{label:"SPARK",color:"#555",bg:"#55555515",next:"confirmed"},
+  confirmed:{label:"CONFIRMED",color:"#3d9eff",bg:"#3d9eff15",next:"escalation"},
+  escalation:{label:"ESCALATION",color:"#f5c842",bg:"#f5c84215",next:"structural"},
+  structural:{label:"STRUCTURAL",color:"#ff7a3d",bg:"#ff7a3d15",next:"regime"},
+  regime:{label:"REGIME",color:"#ff4d6a",bg:"#ff4d6a15",next:null},
+};
+
+const BOTS=["GEO","MACRO","EARNINGS","FUNDAMENTALS","NEWS","TECHNICAL","INSIDER","ANALYST","HIRING"];
+const BOT_COLORS={
+  GEO:"#a78bfa",MACRO:"#3d9eff",EARNINGS:"#00d68f",FUNDAMENTALS:"#f5c842",
+  NEWS:"#ff7a3d",TECHNICAL:"#00d68f",INSIDER:"#ff4d6a",ANALYST:"#3d9eff",HIRING:"#a78bfa"
+};
+
+const SECTORS=["All",...new Set(ASSETS.map(a=>a.sector))];
+const CAPS_ORDER=["All","Small","Mid","Large"];
+const CAP_COLORS={Small:"#f5c842",Mid:"#00d68f",Large:"#3d9eff"};
+
+// ─────────────────────────────────────────────────────────────
+//  SIGNAL GENERATOR  (deterministic mock until real bot data)
+// ─────────────────────────────────────────────────────────────
+function sr(seed,min,max){const x=Math.sin(seed)*10000;return min+(x-Math.floor(x))*(max-min);}
+
+const SIGNAL_TEMPLATES={
+  GEO:[
+    "Red Sea diversions active — vessels rerouting via Cape of Good Hope",
+    "Strait of Hormuz tension elevated — Iran naval activity reported",
+    "Ukraine conflict supply chain disruption affecting European routes",
+    "NATO Article 5 discussions ongoing — defence spending pledges increasing",
+    "Sanctions package expansion under review — commodity flows at risk",
+    "Middle East ceasefire negotiations stalled — risk premium persisting",
+  ],
+  MACRO:[
+    "Fed signals rates higher for longer — dollar strength persisting",
+    "PMI contraction deepening in Eurozone — recessionary risk rising",
+    "China stimulus package approved — commodity demand recovery signal",
+    "Inflation reacceleration risk flagged — energy component key driver",
+    "Yield curve inversion deepening — historical recession indicator",
+    "ECB rate decision imminent — currency volatility window open",
+  ],
+  EARNINGS:[
+    "Beat consensus by +12% on revenue — guidance raised for FY",
+    "Missed EPS by $0.08 — margin compression cited by management",
+    "Record quarterly revenue announced — growth accelerating YoY",
+    "Earnings call flagged 'challenging macro environment' — caution",
+    "Inventory writedown disclosed — Q4 outlook revised lower",
+    "Strong free cash flow generation — buyback programme expanded",
+  ],
+  FUNDAMENTALS:[
+    "P/E at 5-year low vs sector peers — potential value entry",
+    "Debt/equity ratio deteriorating — balance sheet stress signal",
+    "Revenue growth accelerating 3 consecutive quarters",
+    "Net cash position strong — no dilution risk near term",
+    "Return on equity declining — efficiency concerns emerging",
+    "Book value discount wide — activist potential flagged",
+  ],
+  NEWS:[
+    "Regulatory investigation opened — headline risk elevated",
+    "Strategic acquisition rumour circulating — premium potential",
+    "Contract win announced — adds 8% to forward revenue estimate",
+    "CEO departure sudden — uncertainty premium warranted",
+    "Product recall issued — reputational and financial cost risk",
+    "Partnership agreement with major player — validation signal",
+  ],
+  TECHNICAL:[
+    "Breaking 3-month resistance on 2.1x average volume",
+    "Golden cross forming — 50MA crossing above 200MA",
+    "RSI divergence bullish — momentum building below oversold",
+    "Head and shoulders pattern completing — downside target active",
+    "Support level defended — buying pressure confirmed at key level",
+    "Volume accumulation detected — institutional build-up pattern",
+  ],
+  INSIDER:[
+    "CEO purchased 85,000 shares at market — largest buy in 3 years",
+    "CFO sold 40% of holding post earnings — post-vest disposal",
+    "Three board members bought simultaneously — coordinated signal",
+    "Director selling on exercised options — routine, no signal",
+    "New institutional 13F filing — 5% position built quietly",
+    "Short interest declining sharply — squeeze potential building",
+  ],
+  ANALYST:[
+    "Upgraded to Buy at Goldman — target raised +28% to new high",
+    "Downgraded to Underperform at JPM — multiple contraction risk",
+    "Consensus target revised up across 6 brokers — alignment signal",
+    "Analyst initiation with Outperform — new coverage catalyst",
+    "Price target cut below current price — negative revisions cycle",
+    "Estimate raised ahead of earnings — whisper number elevated",
+  ],
+  HIRING:[
+    "Engineering headcount up 34% YoY — aggressive growth phase",
+    "Mass layoffs announced — cost restructuring, margin focus",
+    "Senior AI/ML roles posted aggressively — capability build signal",
+    "Hiring freeze extended — cash conservation priority",
+    "Operations roles spiking in new geography — expansion signal",
+    "R&D hiring surge — next-cycle product development accelerating",
+  ],
+};
+
+const SEBASTIAN_PROMPTS={
+  bullish:{
+    spark:"Something's starting here — early signals are pointing up but it's not confirmed yet. Worth keeping an eye on.",
+    confirmed:"This one's building. Multiple sources are agreeing, which is a good sign. Want me to walk you through what's driving it?",
+    escalation:"The momentum here is real. Several intelligence sources are aligned and the price action is responding. This is the kind of setup worth studying.",
+    structural:"This has moved beyond a trade idea — there's a structural shift happening. The kind of move that lasts weeks, not hours. Want the full picture?",
+    regime:"This is a regime-level catalyst. The kind of thing that reshapes an entire sector. I'd want you to understand exactly what's happening before acting.",
+  },
+  bearish:{
+    spark:"Early warning signs here — not panic territory but something to monitor.",
+    confirmed:"Confirmed negative signals across multiple sources. Worth understanding why before the market fully prices this in.",
+    escalation:"Pressure is building. The short side is getting crowded for a reason. Want me to break down the bear case?",
+    structural:"Structural weakness confirmed. This isn't a dip — this is a trend change. Let me show you what the bots are seeing.",
+    regime:"Regime-level deterioration. Multiple systemic signals aligned. Protective positioning worth considering.",
+  },
+  neutral:{
+    spark:"Something stirred but no clear direction yet. Monitoring.",
+    confirmed:"Mixed signals — some bots bullish, some cautious. Classic uncertainty setup.",
+    escalation:"Elevated activity but no strong bias. The market's figuring this out in real time.",
+    structural:"Complex picture. Multiple valid narratives competing. Let's look at the evidence together.",
+    regime:"High-intensity regime with no clear directional bias. Volatility play, not directional.",
+  },
+};
+
+function generateIntelligence(asset, sessionKey){
+  const s=asset.ticker.split("").reduce((a,c)=>a+c.charCodeAt(0),0)+sessionKey;
+  const r=(o=0)=>sr(s+o,-1,1);
+  const rn=(min,max,o=0)=>sr(s+o,min,max);
+
+  // Determine which bots fired
+  const botCount=Math.floor(rn(1,BOTS.length,1));
+  const shuffled=[...BOTS].sort((_,__)=>sr(s+__.charCodeAt?__.charCodeAt(0):0,-1,1));
+  const activeBots=shuffled.slice(0,Math.min(botCount,5));
+
+  // Signal packets per active bot
+  const signals=activeBots.map((bot,i)=>{
+    const templates=SIGNAL_TEMPLATES[bot];
+    const idx=Math.floor(rn(0,templates.length,i*7));
+    const strength=parseFloat(rn(0.3,0.95,i*13).toFixed(2));
+    const bullish=r(i*19)>-0.1;
+    return{bot,text:templates[idx]||templates[0],strength,bullish};
+  });
+
+  // Confidence score (0-100)
+  const baseConf=rn(20,92,99);
+  const verificationBonus=activeBots.length>=3?12:activeBots.length>=2?6:0;
+  const confidence=Math.min(99,Math.round(baseConf+verificationBonus));
+
+  // Intensity (signal alignment strength)
+  const bullishSignals=signals.filter(s=>s.bullish).length;
+  const alignment=bullishSignals/Math.max(signals.length,1);
+  const intensity=Math.round((alignment*0.6+rn(0.1,0.5,88)*0.4)*100);
+
+  // Wave state (evidence-gated)
+  let wave="spark";
+  if(confidence>=42&&activeBots.length>=2)wave="confirmed";
+  if(confidence>=58&&activeBots.length>=2)wave="escalation";
+  if(confidence>=72&&activeBots.length>=3)wave="structural";
+  if(confidence>=85&&activeBots.length>=4)wave="regime";
+
+  // Override with some forced variety for demo
+  const forceWave=["spark","spark","confirmed","confirmed","confirmed","escalation","escalation","structural","regime"];
+  wave=forceWave[Math.floor(rn(0,forceWave.length,77))];
+
+  // Bias
+  const biasScore=alignment*100-(100-intensity)*0.3;
+  const bias=biasScore>58?"bullish":biasScore<40?"bearish":"neutral";
+
+  // Price range by sector
+  const priceRanges={
+    Shipping:[10,80],Defence:[200,600],Energy:[20,130],Technology:[15,900],
+    Metals:[15,250],Minerals:[2,80],Insurance:[50,600],Finance:[50,600],
+    Crypto:[0.5,100000],Logistics:[80,300],Consumer:[50,500],Forex:[0.6,200],
+  };
+  const[pMin,pMax]=priceRanges[asset.sector]||[10,500];
+  const price=parseFloat(rn(pMin,pMax,55).toFixed(asset.sector==="Crypto"&&pMax>1000?0:2));
+  const changePct=parseFloat(rn(-8,8,66).toFixed(2));
+
+  // Perplexity verdict (simulated)
+  const verdicts=["supported","supported","mixed","weak","contradicted"];
+  const verdict=verdicts[Math.floor(rn(0,verdicts.length,101))];
+  const verScore=verdict==="supported"?0.7:verdict==="mixed"?0.2:verdict==="weak"?-0.1:-0.5;
+
+  // Sebastian prompt
+  const sbPrompt=SEBASTIAN_PROMPTS[bias]?.[wave]||SEBASTIAN_PROMPTS.neutral.spark;
+
+  return{
+    confidence,intensity,wave,bias,signals,activeBots,
+    price,changePct,livePrice:false,marketState:"CLOSED",
+    perplexity:{verdict,score:verScore,
+      summary:verdict==="supported"?"Independent verification confirms the thesis across multiple sources.":
+               verdict==="mixed"?"Mixed signals from external verification — proceed with caution.":
+               verdict==="weak"?"Weak external support — signals may be noise.":
+               "External data contradicts internal signals — risk elevated."},
+    fundamentals:{pe:parseFloat(rn(3,45,201).toFixed(1)),debtEquity:parseFloat(rn(0,3,202).toFixed(2)),revGrowth:parseFloat(rn(-20,80,203).toFixed(1))},
+    technical:{rsi:parseFloat(rn(18,82,204).toFixed(0)),volume:parseFloat(rn(0.4,4,205).toFixed(1)),macd:parseFloat(rn(-1,1,206).toFixed(2))},
+    sbPrompt,
+  };
+}
+
+function mergeLive(intel,liveData,ticker){
+  const live=liveData?.[ticker];
+  if(!live?.price)return intel;
+  const realPrice=live.currency==="GBX"?live.price/100:live.price;
+  return{...intel,price:parseFloat(realPrice.toFixed(realPrice>100?2:4)),changePct:live.change_pct||0,livePrice:true,marketState:live.market_state||"CLOSED",currency:live.currency||"USD"};
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SMALL HELPERS
+// ─────────────────────────────────────────────────────────────
+const fmtPct=(n,d=1)=>`${n>0?"+":""}${parseFloat(n||0).toFixed(d)}%`;
+const pCol=v=>v>0?"#00d68f":v<0?"#ff4d6a":"#6a6a9a";
+const uid=()=>Math.random().toString(36).slice(2,9);
+
+function WaveBadge({wave}){
+  const c=WAVE_CFG[wave]||WAVE_CFG.spark;
+  return(
+    <span style={{fontSize:7,letterSpacing:.8,border:`1px solid`,borderColor:c.color+"44",color:c.color,borderRadius:3,padding:"1px 5px",whiteSpace:"nowrap"}}>
+      {c.label}
+    </span>
+  );
+}
+
+function BiasIcon({bias}){
+  if(bias==="bullish")return<span style={{color:"#00d68f",fontSize:8}}>▲ BULL</span>;
+  if(bias==="bearish")return<span style={{color:"#ff4d6a",fontSize:8}}>▼ BEAR</span>;
+  return<span style={{color:"#6a6a9a",fontSize:8}}>◆ NEUTRAL</span>;
+}
+
+function MiniBar({value,color,max=100}){
+  const pct=Math.max(0,Math.min(100,(value/max)*100));
+  return(
+    <div className="bar-track" style={{width:"100%"}}>
+      <div className="bar-fill" style={{width:`${pct}%`,background:color}}/>
+    </div>
+  );
+}
+
+function StatBox({label,value,color="#c8cce8",sub}){
+  return(
+    <div className="stat-box">
+      <div className="label">{label}</div>
+      <div className="value" style={{color}}>{value}</div>
+      {sub&&<div style={{fontSize:7,color:"#3a3a60",marginTop:1}}>{sub}</div>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DETAIL PANEL  (right side when card selected)
+// ─────────────────────────────────────────────────────────────
+function DetailPanel({asset,intel,fmtMoney,onWatch,onAskSebastian,isWatching}){
+  const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
+  const vc={supported:"#00d68f",mixed:"#f5c842",weak:"#ff7a3d",contradicted:"#ff4d6a"}[intel.perplexity.verdict]||"#6a6a9a";
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[intel.bias];
+
+  return(
+    <div className="detail-panel" style={{height:"100%",overflowY:"auto",padding:"14px 12px",display:"flex",flexDirection:"column",gap:10}}>
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:"#e0e4ff",letterSpacing:.5}}>{asset.ticker}</div>
+          <div style={{fontSize:9,color:"#3a3a60",marginTop:1}}>{asset.name} · {asset.sector} · {asset.sub}</div>
+          <div style={{display:"flex",gap:5,marginTop:5,flexWrap:"wrap",alignItems:"center"}}>
+            <WaveBadge wave={intel.wave}/>
+            <BiasIcon bias={intel.bias}/>
+            {intel.livePrice&&<span style={{fontSize:7,color:"#00d68f"}}>● LIVE</span>}
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"'IBM Plex Mono'",fontSize:17,fontWeight:600,color:"#e0e4ff"}}>{fmtMoney(intel.price)}</div>
+          <div style={{fontSize:10,color:pCol(intel.changePct),fontFamily:"monospace"}}>{fmtPct(intel.changePct)}</div>
+        </div>
+      </div>
+
+      {/* Confidence + Intensity */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"9px 10px",border:"1px solid var(--border)"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+              <span style={{fontSize:7,color:"#3a3a60",letterSpacing:1}}>CONFIDENCE</span>
+              <span style={{fontSize:10,color:"#e0e4ff",fontWeight:600}}>{intel.confidence}%</span>
+            </div>
+            <MiniBar value={intel.confidence} color={intel.confidence>=72?"#00d68f":intel.confidence>=55?"#f5c842":"#ff7a3d"}/>
+          </div>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+              <span style={{fontSize:7,color:"#3a3a60",letterSpacing:1}}>INTENSITY</span>
+              <span style={{fontSize:10,color:"#e0e4ff",fontWeight:600}}>{intel.intensity}%</span>
+            </div>
+            <MiniBar value={intel.intensity} color={biasColor}/>
+          </div>
+        </div>
+
+        {/* Wave progress */}
+        <div>
+          <div style={{fontSize:7,color:"#3a3a60",letterSpacing:1,marginBottom:5}}>WAVE PROGRESSION</div>
+          <div style={{display:"flex",gap:3,alignItems:"center"}}>
+            {WAVE_STATES.map((ws,i)=>{
+              const wc2=WAVE_CFG[ws];
+              const isActive=ws===intel.wave;
+              const isPast=WAVE_STATES.indexOf(intel.wave)>i;
+              return(
+                <React.Fragment key={ws}>
+                  <div style={{flex:1,textAlign:"center",padding:"3px 4px",borderRadius:3,background:isActive?wc2.bg:isPast?"#ffffff08":"transparent",border:`1px solid ${isActive?wc2.color:isPast?"#ffffff15":"var(--border)"}`,transition:"all 0.2s"}}>
+                    <div style={{fontSize:6,letterSpacing:.5,color:isActive?wc2.color:isPast?"#ffffff30":"#2e2e50",fontWeight:isActive?700:400}}>{wc2.label}</div>
+                  </div>
+                  {i<WAVE_STATES.length-1&&<div style={{width:6,height:1,background:isPast?"#ffffff20":"var(--border)",flexShrink:0}}/>}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Bot signals */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"9px 10px",border:"1px solid var(--border)"}}>
+        <div className="section-label">BOT INTELLIGENCE ({intel.signals.length} SOURCE{intel.signals.length!==1?"S":""})</div>
+        {intel.signals.map((sig,i)=>{
+          const bc=BOT_COLORS[sig.bot]||"#6a6a9a";
+          return(
+            <div key={i} className="signal-row">
+              <span className="bot-tag" style={{color:bc,borderColor:bc+"44"}}>{sig.bot}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:9,color:"#b0b4d0",lineHeight:1.5}}>{sig.text}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3}}>
+                  <div className="bar-track" style={{width:50,flexShrink:0}}>
+                    <div className="bar-fill" style={{width:`${sig.strength*100}%`,background:sig.bullish?"#00d68f":"#ff4d6a"}}/>
+                  </div>
+                  <span style={{fontSize:7,color:"#3a3a60"}}>{(sig.strength*100).toFixed(0)}% strength · {sig.bullish?"bullish":"bearish"}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {/* Inactive bots */}
+        <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+          {BOTS.filter(b=>!intel.activeBots.includes(b)).map(b=>(
+            <span key={b} style={{fontSize:7,color:"#2e2e50",border:"1px solid #111128",borderRadius:3,padding:"1px 4px"}}>{b}</span>
+          ))}
+          {BOTS.filter(b=>!intel.activeBots.includes(b)).length>0&&(
+            <span style={{fontSize:7,color:"#2e2e50"}}>bots inactive</span>
+          )}
+        </div>
+      </div>
+
+      {/* Perplexity verification */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"9px 10px",border:`1px solid ${vc}22`}}>
+        <div className="section-label">PERPLEXITY VERIFICATION</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <span style={{fontSize:10,color:vc,fontWeight:600,letterSpacing:.5}}>{intel.perplexity.verdict.toUpperCase()}</span>
+          <span style={{fontSize:9,color:"#3a3a60"}}>score: {intel.perplexity.score>0?"+":""}{(intel.perplexity.score*100).toFixed(0)}</span>
+        </div>
+        <div style={{fontSize:9,color:"#7a7a9a",lineHeight:1.5}}>{intel.perplexity.summary}</div>
+      </div>
+
+      {/* Fundamentals + Technical */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+        <StatBox label="P/E" value={intel.fundamentals.pe} color={intel.fundamentals.pe<15?"#00d68f":intel.fundamentals.pe>40?"#ff4d6a":"#c8cce8"}/>
+        <StatBox label="DEBT/EQ" value={intel.fundamentals.debtEquity} color={intel.fundamentals.debtEquity<1?"#00d68f":intel.fundamentals.debtEquity>2?"#ff4d6a":"#c8cce8"}/>
+        <StatBox label="REV GRWTH" value={fmtPct(intel.fundamentals.revGrowth,0)} color={pCol(intel.fundamentals.revGrowth)}/>
+        <StatBox label="RSI" value={intel.technical.rsi} color={intel.technical.rsi<30?"#00d68f":intel.technical.rsi>70?"#ff4d6a":"#c8cce8"}/>
+        <StatBox label="VOL ×" value={`${intel.technical.volume}×`} color={intel.technical.volume>1.5?"#3d9eff":"#6a6a9a"}/>
+        <StatBox label="MACD" value={intel.technical.macd>0?"↑ POS":"↓ NEG"} color={intel.technical.macd>0?"#00d68f":"#ff4d6a"}/>
+      </div>
+
+      {/* Sebastian prompt */}
+      <div style={{background:wc.bg,border:`1px solid ${wc.color}33`,borderRadius:5,padding:"10px 11px"}}>
+        <div style={{fontSize:7,color:wc.color,letterSpacing:1.5,marginBottom:5}}>SEBASTIAN</div>
+        <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.6,fontStyle:"italic"}}>"{intel.sbPrompt}"</div>
+        <button
+          className="btn btn-ask"
+          style={{marginTop:8,width:"100%",padding:"6px 8px",fontSize:9}}
+          onClick={()=>onAskSebastian(asset,intel)}
+        >
+          Ask Sebastian about {asset.ticker} →
+        </button>
+      </div>
+
+      {/* Watch btn */}
+      <button
+        className={`btn btn-watch ${isWatching?"active":""}`}
+        style={{width:"100%",padding:"7px"}}
+        onClick={()=>onWatch(asset,intel)}
+      >
+        {isWatching?"★ WATCHING":"★ ADD TO WATCHLIST"}
+      </button>
+
+      <div style={{fontSize:7,color:"#1a1a30",textAlign:"center",paddingBottom:4}}>
+        Virtual intelligence only. Not financial advice.
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  INTELLIGENCE CARD  (compact)
+// ─────────────────────────────────────────────────────────────
+function IntelCard({asset,intel,selected,onSelect,fmtMoney,isWatching}){
+  const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[intel.bias];
+  const confColor=intel.confidence>=72?"#00d68f":intel.confidence>=55?"#f5c842":"#ff7a3d";
+
+  return(
+    <div
+      className={`intel-card card-enter${selected?" selected":""}`}
+      onClick={onSelect}
+    >
+      {/* accent bar = wave colour */}
+      <div className="accent-bar" style={{background:wc.color}}/>
+
+      {/* Row 1: ticker + live dot + wave */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+        <div style={{display:"flex",gap:4,alignItems:"center"}}>
+          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,color:"#e0e4ff",letterSpacing:.3}}>{asset.ticker}</span>
+          {intel.livePrice&&<span style={{fontSize:6,color:"#00d68f"}}>●</span>}
+        </div>
+        <WaveBadge wave={intel.wave}/>
+      </div>
+
+      {/* Row 2: name + sector */}
+      <div style={{fontSize:7,color:"#3a3a60",marginBottom:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{asset.name} · <span style={{color:"#2e2e55"}}>{asset.sector}</span></div>
+
+      {/* Row 3: price + change */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+        <span style={{fontFamily:"'IBM Plex Mono'",fontSize:11,fontWeight:600,color:"#d0d4f0"}}>{fmtMoney(intel.price)}</span>
+        <span style={{fontSize:9,color:pCol(intel.changePct),fontFamily:"monospace"}}>{fmtPct(intel.changePct)}</span>
+      </div>
+
+      {/* Row 4: confidence bar */}
+      <div style={{marginBottom:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+          <span style={{fontSize:6,color:"#2e2e50",letterSpacing:1}}>CONF</span>
+          <span style={{fontSize:7,color:confColor,fontWeight:600}}>{intel.confidence}%</span>
+        </div>
+        <MiniBar value={intel.confidence} color={confColor}/>
+      </div>
+
+      {/* Row 5: intensity bar */}
+      <div style={{marginBottom:5}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+          <span style={{fontSize:6,color:"#2e2e50",letterSpacing:1}}>INTENSITY</span>
+          <span style={{fontSize:7,color:biasColor,fontWeight:600}}>{intel.intensity}%</span>
+        </div>
+        <MiniBar value={intel.intensity} color={biasColor}/>
+      </div>
+
+      {/* Row 6: bias + cap + bot count */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <BiasIcon bias={intel.bias}/>
+        <div style={{display:"flex",gap:3,alignItems:"center"}}>
+          <span style={{fontSize:7,color:CAP_COLORS[asset.cap]||"#6a6a9a"}}>{asset.cap}</span>
+          <span style={{fontSize:7,color:"#2e2e50"}}>{intel.signals.length}B</span>
+          {isWatching&&<span style={{fontSize:7,color:"#f5c842"}}>★</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN API  (routes through backend — API key server-side)
+// ─────────────────────────────────────────────────────────────
+async function callSebastian(question, history=[], mode="auto", context={}){
+  // Sebastian — analyst endpoint
+  const j=await api("/api/sebastian",{
+    method:"POST",
+    body:JSON.stringify({question,history,mode,context}),
+  });
+  return {response:j.response||"No response received.", agent:"sebastian"};
+}
+
+async function callPersona(question, history=[], mode="auto", context={}){
+  // Persona Bot — trading-style interpreter endpoint (separate)
+  const j=await api("/api/persona",{
+    method:"POST",
+    body:JSON.stringify({question,history,mode,context}),
+  });
+  return {response:j.response||"No response received.", agent:"persona"};
+}
+
+// Persona Bot trigger phrases — used by auto-routing
+const PERSONA_TRIGGERS=[
+  "momentum trader","defensive allocator","macro swing","swing trader",
+  "value investor","contrarian","technical trader","risk-off","risk-on",
+  "how would a","how does a","from a trader","trading style","event-driven",
+  "growth investor","how a trader","what would a","through the lens",
+  "commodities specialist","geopolitical risk trader","quant trader",
+  "mean-reversion","risk-on allocator","risk-off allocator",
+];
+
+function detectAgent(question, forcedAgent="auto"){
+  if(forcedAgent==="sebastian") return "sebastian";
+  if(forcedAgent==="persona")   return "persona";
+  const q=question.toLowerCase();
+  return PERSONA_TRIGGERS.some(t=>q.includes(t)) ? "persona" : "sebastian";
+}
+
+// ─────────────────────────────────────────────────────────────
+//  CATALYST VIEW
+// ─────────────────────────────────────────────────────────────
+const WAVE_ORDER_NUM={spark:1,confirmed:2,escalation:3,structural:4,regime:5};
+
+function CatalystCard({cat,selected,onSelect}){
+  const wc=WAVE_CFG[cat.wave]||WAVE_CFG.spark;
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[cat.direction]||"#6a6a9a";
+  const isSelected=selected?.id===cat.id;
+  return(
+    <div onClick={()=>onSelect(isSelected?null:cat)}
+      style={{background:isSelected?wc.bg:"var(--bg1)",border:`1px solid ${isSelected?wc.color:"var(--border)"}`,borderRadius:6,padding:"9px 10px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.15s"}}>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:"1.5px",background:wc.color}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:3}}>
+        <WaveBadge wave={cat.wave}/>
+        <div style={{display:"flex",gap:4,alignItems:"center"}}>
+          {cat.verified&&<span style={{fontSize:7,color:"#00d68f"}}>✓</span>}
+          <span style={{fontSize:7,color:biasColor}}>{cat.direction}</span>
+        </div>
+      </div>
+      <div style={{fontSize:9,color:"#c0c4e0",lineHeight:1.4,marginBottom:4,fontWeight:500}}>{(cat.title||cat.headline||"").slice(0,70)}</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+        <span style={{fontSize:8,color:"var(--text2)"}}>{(cat.assets||[]).slice(0,3).join(" · ")||"sector-wide"}</span>
+        <span style={{fontSize:8,color:wc.color,fontFamily:"monospace",fontWeight:600}}>{(cat.confidence||0).toFixed(0)}%</span>
+      </div>
+      <div className="bar-track"><div className="bar-fill" style={{width:`${cat.confidence||0}%`,background:wc.color}}/></div>
+      <div style={{display:"flex",gap:4,marginTop:5,flexWrap:"wrap"}}>
+        {(cat.tags||[]).slice(0,4).map(t=><span key={t} style={{fontSize:6,color:"var(--text3)",border:"1px solid var(--border)",borderRadius:2,padding:"0 3px"}}>{t}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function CatalystDetail({cat,fmtMoney,onAskSebastian}){
+  const wc=WAVE_CFG[cat.wave]||WAVE_CFG.spark;
+  const biasColor={bullish:"#00d68f",bearish:"#ff4d6a",neutral:"#6a6a9a"}[cat.direction]||"#6a6a9a";
+  const signals=cat.signal_chain||cat.signals||[];
+  const persona=cat.persona_summary||{};
+  const verif=cat.verification||{};
+
+  return(
+    <div style={{height:"100%",overflowY:"auto",padding:"12px 12px",display:"flex",flexDirection:"column",gap:8}}>
+      {/* Header */}
+      <div style={{borderBottom:`1px solid ${wc.color}33`,paddingBottom:8}}>
+        <div style={{display:"flex",gap:5,marginBottom:4,flexWrap:"wrap",alignItems:"center"}}>
+          <WaveBadge wave={cat.wave}/>
+          <span style={{fontSize:8,color:biasColor,fontWeight:600}}>{cat.direction?.toUpperCase()}</span>
+          {cat.verified&&<span style={{fontSize:7,color:"#00d68f",border:"1px solid #00d68f44",borderRadius:3,padding:"1px 5px"}}>VERIFIED</span>}
+          {cat.attention==="focus"&&<span style={{fontSize:7,color:"#f5c842",border:"1px solid #f5c84244",borderRadius:3,padding:"1px 5px"}}>FOCUS</span>}
+        </div>
+        <div style={{fontSize:11,color:"#d0d4f0",lineHeight:1.5,fontWeight:500}}>{cat.title||cat.headline}</div>
+        <div style={{fontSize:8,color:"var(--text2)",marginTop:3}}>{(cat.assets||[]).join(" · ")||"Sector-wide signal"}</div>
+      </div>
+
+      {/* Confidence */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+          <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>CONFIDENCE</span>
+          <span style={{fontSize:11,color:wc.color,fontWeight:600,fontFamily:"monospace"}}>{(cat.confidence||0).toFixed(1)}%</span>
+        </div>
+        <MiniBar value={cat.confidence||0} color={wc.color}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginTop:6}}>
+          <StatBox label="RENEWALS" value={cat.renewals||0} color="var(--text)"/>
+          <StatBox label="SOURCES" value={(cat.sources_count||cat.signal_count||signals.length)||1} color="var(--blue)"/>
+          <StatBox label="TYPE" value={(cat.type||"asset").toUpperCase()} color="var(--text2)"/>
+        </div>
+      </div>
+
+      {/* Wave progression */}
+      <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+        <div className="section-label">WAVE STATE</div>
+        <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:6}}>
+          {["spark","confirmed","escalation","structural","regime"].map((ws,i)=>{
+            const wc2=WAVE_CFG[ws];
+            const isActive=ws===cat.wave;
+            const isPast=WAVE_ORDER_NUM[cat.wave]>WAVE_ORDER_NUM[ws];
+            return(
+              <React.Fragment key={ws}>
+                <div style={{flex:1,textAlign:"center",padding:"3px 2px",borderRadius:3,background:isActive?wc2.bg:isPast?"#ffffff08":"transparent",border:`1px solid ${isActive?wc2.color:isPast?"#ffffff15":"var(--border)"}`}}>
+                  <div style={{fontSize:5.5,letterSpacing:.3,color:isActive?wc2.color:isPast?"#ffffff25":"var(--text3)",fontWeight:isActive?700:400}}>{wc2.label}</div>
+                </div>
+                {i<4&&<div style={{width:4,height:1,background:isPast?"#ffffff15":"var(--border)",flexShrink:0}}/>}
+              </React.Fragment>
+            );
+          })}
+        </div>
+        {cat.wave_note&&<div style={{fontSize:8,color:"var(--text2)",lineHeight:1.5,fontStyle:"italic"}}>"{cat.wave_note}"</div>}
+      </div>
+
+      {/* Persona summary */}
+      {(persona.summary||cat.summary)&&(
+        <div style={{background:wc.bg,border:`1px solid ${wc.color}33`,borderRadius:5,padding:"8px 10px"}}>
+          <div className="section-label" style={{color:wc.color}}>INTELLIGENCE SUMMARY</div>
+          <div style={{fontSize:9,color:"#b0b4d0",lineHeight:1.6}}>{persona.summary||cat.summary}</div>
+          {persona.why_it_matters&&<div style={{fontSize:8,color:"var(--text2)",marginTop:5,lineHeight:1.5,borderTop:"1px solid var(--border)",paddingTop:5}}><span style={{color:"var(--text3)"}}>WHY IT MATTERS: </span>{persona.why_it_matters}</div>}
+          {(persona.what_to_watch||[]).length>0&&<div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:3}}>{persona.what_to_watch.map((w,i)=><span key={i} style={{fontSize:7,color:"var(--text2)",border:"1px solid var(--border)",borderRadius:3,padding:"1px 5px"}}>→ {w}</span>)}</div>}
+        </div>
+      )}
+
+      {/* Perplexity verification */}
+      {(verif.verdict||cat.verified)&&(()=>{
+        const vc={supported:"#00d68f",mixed:"#f5c842",weak:"#ff7a3d",contradicted:"#ff4d6a"}[verif.verdict]||"#6a6a9a";
+        return(
+          <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:`1px solid ${vc}22`}}>
+            <div className="section-label">PERPLEXITY VERIFICATION</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <span style={{fontSize:10,color:vc,fontWeight:600}}>{(verif.verdict||"verified").toUpperCase()}</span>
+              {verif.score!==undefined&&<span style={{fontSize:8,color:"var(--text3)"}}>score: {verif.score>0?"+":""}{(verif.score*100||0).toFixed(0)}</span>}
+            </div>
+            {verif.justification&&<div style={{fontSize:8,color:"#7a7a9a",lineHeight:1.5,marginBottom:5}}>{verif.justification}</div>}
+            {(verif.key_risks||[]).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3}}>{verif.key_risks.map((r,i)=><span key={i} style={{fontSize:7,color:"#ff7a3d",border:"1px solid #ff7a3d22",borderRadius:3,padding:"1px 4px"}}>⚠ {r}</span>)}</div>}
+          </div>
+        );
+      })()}
+
+      {/* Signal chain */}
+      {signals.length>0&&(
+        <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+          <div className="section-label">SIGNAL CHAIN ({signals.length})</div>
+          {signals.map((s,i)=>{
+            const bc=BOT_COLORS[s.source||s.bot]||"#6a6a9a";
+            return(
+              <div key={i} className="signal-row">
+                <span className="bot-tag" style={{color:bc,borderColor:bc+"44"}}>{(s.source||s.bot||"BOT").replace("Bot","").toUpperCase()}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:8,color:"#b0b4d0",lineHeight:1.4}}>{s.summary||s.text||""}</div>
+                  <div style={{fontSize:7,color:"var(--text3)",marginTop:2}}>STR {s.strength||0} · {s.ts?new Date(s.ts*1000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}):"--:--"}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Scope */}
+      {((cat.assets||[]).length>0||(cat.sectors||[]).length>0)&&(
+        <div style={{background:"var(--bg2)",borderRadius:5,padding:"8px 10px",border:"1px solid var(--border)"}}>
+          <div className="section-label">SCOPE</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+            {(cat.assets||[]).map(a=><span key={a} style={{fontSize:8,color:"var(--blue)",border:"1px solid var(--blue)22",borderRadius:3,padding:"1px 5px"}}>{a}</span>)}
+            {(cat.sectors||[]).map(s=><span key={s} style={{fontSize:8,color:"var(--text2)",border:"1px solid var(--border2)",borderRadius:3,padding:"1px 5px"}}>{s}</span>)}
+          </div>
+        </div>
+      )}
+
+      {/* Ask Sebastian */}
+      <button onClick={()=>onAskSebastian(cat)} className="btn btn-ask" style={{width:"100%",padding:"8px",fontSize:9}}>
+        Ask Sebastian about this catalyst →
+      </button>
+    </div>
+  );
+}
+
+function CatalystView({fmtMoney}){
+  const[catalysts,setCatalysts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[selected,setSelected]=useState(null);
+  const[filter,setFilter]=useState("all");
+  const[sebastianTarget,setSebastianTarget]=useState(null);
+
+  const load=useCallback(async()=>{
+    try{
+      const j=await api("/api/catalysts");
+      const cats=j.catalysts||j||[];
+      const wave_order={regime:5,structural:4,escalation:3,confirmed:2,spark:1};
+      cats.sort((a,b)=>(wave_order[b.wave]||0)-(wave_order[a.wave]||0)||(b.confidence||0)-(a.confidence||0));
+      setCatalysts(cats);
+    }catch(e){
+      setCatalysts([]);
+    }
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{load();},[]);
+  useEffect(()=>{const t=setInterval(load,15000);return()=>clearInterval(t);},[]);
+
+  const filtered=catalysts.filter(c=>{
+    if(filter==="focus")return c.attention==="focus";
+    if(filter==="high")return(c.confidence||0)>=65;
+    if(filter==="verified")return c.verified;
+    if(filter==="escalation")return["escalation","structural","regime"].includes(c.wave);
+    return true;
+  });
+
+  const waveCounts={spark:0,confirmed:0,escalation:0,structural:0,regime:0};
+  catalysts.forEach(c=>{if(waveCounts[c.wave]!==undefined)waveCounts[c.wave]++;});
+
+  return(
+    <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+      {sebastianTarget&&(
+        <SebastianPage
+          initialQuestion={`Tell me about this catalyst: ${sebastianTarget.title||sebastianTarget.headline}`}
+          initialContext={{catalyst:sebastianTarget}}
+          onClose={()=>setSebastianTarget(null)}
+          asModal
+        />
+      )}
+      {/* Left: catalyst list */}
+      <div style={{width:280,borderRight:"1px solid var(--border)",display:"flex",flexDirection:"column",flexShrink:0}}>
+        {/* Header */}
+        <div style={{padding:"8px 10px",borderBottom:"1px solid var(--border)",background:"var(--bg1)",flexShrink:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:8,color:"var(--text3)",letterSpacing:2}}>CATALYSTS</span>
+            <span style={{fontSize:9,color:"var(--text2)",fontFamily:"monospace"}}>{catalysts.length} active</span>
+          </div>
+          {/* Wave summary */}
+          <div style={{display:"flex",gap:3,marginBottom:6}}>
+            {Object.entries(waveCounts).filter(([,v])=>v>0).map(([wave,count])=>{
+              const wc=WAVE_CFG[wave];
+              return<div key={wave} style={{flex:1,textAlign:"center",background:wc.bg,border:`1px solid ${wc.color}44`,borderRadius:3,padding:"2px"}}>
+                <div style={{fontSize:8,color:wc.color,fontWeight:700}}>{count}</div>
+                <div style={{fontSize:5.5,color:wc.color,opacity:.7}}>{wc.label.slice(0,4)}</div>
+              </div>;
+            })}
+          </div>
+          {/* Filters */}
+          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+            {[["all","ALL"],["focus","FOCUS"],["escalation","ESC+"],["verified","✓ VER"],["high","HIGH"]].map(([v,l])=>(
+              <button key={v} className={`pill${filter===v?" active":""}`} onClick={()=>setFilter(v)} style={{fontSize:7,padding:"2px 6px"}}>{l}</button>
+            ))}
+          </div>
+        </div>
+        {/* List */}
+        <div style={{flex:1,overflowY:"auto",padding:6,display:"flex",flexDirection:"column",gap:4}}>
+          {loading&&<div style={{textAlign:"center",padding:20,color:"var(--text3)",fontSize:9}}>Loading catalysts...</div>}
+          {!loading&&filtered.length===0&&<div style={{textAlign:"center",padding:20,color:"var(--text3)",fontSize:9}}>No catalysts match this filter.</div>}
+          {filtered.map(cat=>(
+            <CatalystCard key={cat.id} cat={cat} selected={selected} onSelect={setSelected}/>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: detail or empty state */}
+      <div style={{flex:1,overflow:"hidden",background:"var(--bg1)"}}>
+        {selected?(
+          <div style={{height:"100%",display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"6px 10px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--bg2)",flexShrink:0}}>
+              <span style={{fontSize:7,color:"var(--text3)",letterSpacing:2}}>CATALYST DETAIL</span>
+              <button onClick={()=>setSelected(null)} style={{background:"none",border:"none",color:"var(--text3)",fontSize:14}}>×</button>
+            </div>
+            <CatalystDetail cat={selected} fmtMoney={fmtMoney} onAskSebastian={cat=>{setSebastianTarget(cat);}}/>
+          </div>
+        ):(
+          <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+            <div style={{fontSize:24,color:"var(--text3)"}}>◈</div>
+            <div style={{fontSize:9,color:"var(--text3)"}}>Select a catalyst to view detail</div>
+            <div style={{fontSize:8,color:"var(--text3)",opacity:.5}}>{catalysts.length} active · auto-refreshing</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN PAGE  (full dedicated view + modal mode)
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN PAGE — split pane with linked intelligence
+//
+//  Architecture:
+//  - On open: fetch /api/sebastian/context (movers, catalysts, Perplexity)
+//  - Sebastian pane: auto-fires opening brief including movers >5%
+//  - Persona pane: reads Sebastian's last response as its primary context
+//  - Persona suggested prompts: regenerate after every Sebastian message
+//  - Both panes share the same live context snapshot
+// ─────────────────────────────────────────────────────────────
+
+function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=false}){
+  const[mode,setMode]=useState("auto");
+
+  // Shared intelligence context — fetched once on open, refreshed on Sebastian response
+  const[sbContext,setSbContext]=useState(null);   // raw /api/sebastian/context snapshot
+  const[sebastianLastMsg,setSebastianLastMsg]=useState(""); // last Sebastian response text
+
+  // Sebastian pane state
+  const[sebMessages,setSebMessages]=useState([]);
+  const[sebInput,setSebInput]=useState(initialQuestion||"");
+  const[sebLoading,setSebLoading]=useState(false);
+
+  // Persona pane state
+  const[perMessages,setPerMessages]=useState([]);
+  const[perInput,setPerInput]=useState("");
+  const[perLoading,setPerLoading]=useState(false);
+  const[personaSuggested,setPersonaSuggested]=useState([
+    "How would a momentum trader read the top catalyst?",
+    "How would a defensive allocator view this setup?",
+    "How would a macro swing trader approach current sector rotation?",
+    "How would a contrarian read these signals?",
+    "How would a geopolitical risk trader read Defence right now?",
+    "How would an event-driven trader position around this catalyst?",
+  ]);
+
+  const sebBottomRef=useRef(null);
+  const perBottomRef=useRef(null);
+
+  useEffect(()=>{sebBottomRef.current?.scrollIntoView({behavior:"smooth"});},[sebMessages]);
+  useEffect(()=>{perBottomRef.current?.scrollIntoView({behavior:"smooth"});},[perMessages]);
+
+  // ── On mount: fetch market context snapshot ──────────────────
+  useEffect(()=>{
+    api("/api/sebastian/context",{method:"GET"}).then(data=>{
+      setSbContext(data);
+    }).catch(()=>{});
+
+    // Auto-fire Sebastian opening brief
+    const openingQ = initialQuestion ||
+      "Give me the full market brief for right now. Lead with any tickers above 5% daily move (flag small/mid/large cap). Then give me the top catalyst breakdown, the active sector themes, and the overall intelligence chain bias. Be specific — prices, wave states, Perplexity verdicts.";
+    sendSebastian(openingQ, true);
+  },[]);
+
+  // ── Generate dynamic Persona suggested prompts from Sebastian's output ──
+  const generatePersonaSuggested=(sebastianText, contextData)=>{
+    // Extract key signals from Sebastian's response to build relevant prompts
+    const text=sebastianText.toLowerCase();
+    const suggestions=[];
+
+    // Catalyst-specific suggestions
+    if(text.includes("regime")||text.includes("structural")){
+      suggestions.push("How would a macro swing trader position around this structural signal?");
+      suggestions.push("How would a value investor read a regime-level catalyst?");
+    }
+    if(text.includes("escalation")||text.includes("confirmed")){
+      suggestions.push("How would a momentum trader interpret this escalating signal?");
+      suggestions.push("How would an event-driven trader time entry around this?");
+    }
+
+    // Sector-specific suggestions
+    if(text.includes("defence")||text.includes("defense")||text.includes("lmt")||text.includes("rtx")){
+      suggestions.push("How would a geopolitical risk trader read current Defence signals?");
+    }
+    if(text.includes("energy")||text.includes("oil")||text.includes("cl=f")||text.includes("bz=f")){
+      suggestions.push("How would a commodities specialist read the current energy setup?");
+    }
+    if(text.includes("tech")||text.includes("nvda")||text.includes("semiconductor")){
+      suggestions.push("How would a momentum trader read the tech signal right now?");
+    }
+    if(text.includes("shipping")||text.includes("zim")||text.includes("fro")){
+      suggestions.push("How would a macro swing trader view the shipping sector signal?");
+    }
+    if(text.includes("gold")||text.includes("gc=f")||text.includes("safe haven")){
+      suggestions.push("How would a risk-off allocator interpret the gold move?");
+    }
+    if(text.includes("crypto")||text.includes("btc")||text.includes("bitcoin")){
+      suggestions.push("How would a momentum trader read the current crypto signal?");
+    }
+
+    // Perplexity contradiction suggestions
+    if(text.includes("contradict")||text.includes("mixed")||text.includes("disputed")){
+      suggestions.push("How would a contrarian read these Perplexity contradictions?");
+      suggestions.push("How would a defensive allocator treat this verification conflict?");
+    }
+
+    // Mover-specific suggestions (from context)
+    if(contextData?.movers_5pct){
+      const allMovers=[
+        ...(contextData.movers_5pct.large||[]),
+        ...(contextData.movers_5pct.mid||[]),
+        ...(contextData.movers_5pct.small||[]),
+      ];
+      if(allMovers.length>0){
+        const top=allMovers[0];
+        suggestions.push(`How would a momentum trader interpret the ${top.symbol} ${top.change_pct>0?"+":""}${top.change_pct}% move?`);
+      }
+    }
+
+    // Always include at least some defaults if we don't have enough
+    const defaults=[
+      "How would a defensive allocator view this overall setup?",
+      "How would a quant / mean-reversion trader read current signal strength?",
+      "How would a contrarian approach the highest-confidence catalyst?",
+      "How would a risk-on/risk-off allocator read the current macro picture?",
+    ];
+
+    const merged=[...new Set([...suggestions,...defaults])].slice(0,6);
+    setPersonaSuggested(merged);
+  };
+
+  // ── Build Persona Bot context from Sebastian's intelligence ──
+  const buildPersonaContext=()=>{
+    let ctx={};
+    if(sbContext){
+      ctx.market_snapshot={
+        movers_5pct:   sbContext.movers_5pct,
+        mover_summary: sbContext.mover_summary,
+        hot_sectors:   sbContext.hot_sectors,
+        total_tickers: sbContext.total_tickers,
+        ts:            sbContext.ts,
+      };
+      ctx.top_catalysts=(sbContext.catalysts||[]).slice(0,5);
+    }
+    if(sebastianLastMsg){
+      ctx.sebastian_analysis=sebastianLastMsg.slice(0,2000);
+      ctx.sebastian_note="Sebastian has already surfaced this intelligence. Interpret it through the requested trading style without re-analysing from scratch.";
+    }
+    return ctx;
+  };
+
+  // ── Send to Sebastian ────────────────────────────────────────
+  const sendSebastian=async(q, isOpening=false)=>{
+    const question=(q||sebInput).trim();
+    if(!question||sebLoading)return;
+    if(!isOpening) setSebInput("");
+    if(!isOpening) setSebMessages(p=>[...p,{role:"user",content:question}]);
+    setSebLoading(true);
+    try{
+      const result=await callSebastian(question,sebMessages.slice(-10),mode,initialContext);
+      const reply=typeof result==="string"?result:result.response;
+      setSebMessages(p=>[...p,{role:"assistant",content:reply}]);
+      setSebastianLastMsg(reply);
+      // Refresh context snapshot and regenerate persona suggestions
+      api("/api/sebastian/context",{method:"GET"}).then(data=>{
+        setSbContext(data);
+        generatePersonaSuggested(reply,data);
+      }).catch(()=>generatePersonaSuggested(reply,sbContext));
+    }catch(e){
+      setSebMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message||"unknown"}. Please try again.`}]);
+    }
+    setSebLoading(false);
+  };
+
+  // ── Send to Persona Bot ──────────────────────────────────────
+  const sendPersona=async(q)=>{
+    const question=(q||perInput).trim();
+    if(!question||perLoading)return;
+    setPerInput("");
+    setPerMessages(p=>[...p,{role:"user",content:question}]);
+    setPerLoading(true);
+    try{
+      // Persona Bot always receives Sebastian's latest context
+      const personaCtx=buildPersonaContext();
+      const result=await callPersona(question,perMessages.slice(-10),mode,personaCtx);
+      const reply=typeof result==="string"?result:result.response;
+      setPerMessages(p=>[...p,{role:"assistant",content:reply}]);
+    }catch(e){
+      setPerMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message||"unknown"}. Please try again.`}]);
+    }
+    setPerLoading(false);
+  };
+
+  // ── Shared message renderer ──────────────────────────────────
+  const renderMessages=(messages,agentLabel,accentColor)=>(
+    messages.map((m,i)=>(
+      <div key={i} style={{
+        alignSelf:m.role==="user"?"flex-end":"flex-start",
+        maxWidth:"90%",
+        background:m.role==="user"?"#1a2a40":"var(--bg3)",
+        border:`1px solid ${m.role==="user"?accentColor+"44":"var(--border)"}`,
+        borderRadius:6,padding:"7px 10px",animation:"fadeUp 0.15s ease",
+      }}>
+        <div style={{fontSize:7,color:m.role==="user"?"var(--text3)":accentColor,letterSpacing:1,marginBottom:3}}>
+          {m.role==="user"?"YOU":agentLabel}
+        </div>
+        <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
+          {m.content}
+        </div>
+      </div>
+    ))
+  );
+
+  const pageContent=(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+
+      {/* Top bar */}
+      <div style={{
+        padding:"7px 14px",borderBottom:"1px solid var(--border2)",
+        display:"flex",justifyContent:"space-between",alignItems:"center",
+        flexShrink:0,background:"var(--bg2)",
+      }}>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>
+            INTELLIGENCE CHAT
+          </div>
+          {sbContext&&sbContext.movers_5pct&&(()=>{
+            const all=[
+              ...(sbContext.movers_5pct.large||[]),
+              ...(sbContext.movers_5pct.mid||[]),
+              ...(sbContext.movers_5pct.small||[]),
+            ];
+            if(all.length===0) return null;
+            return(
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {all.slice(0,5).map(m=>(
+                  <span key={m.symbol} style={{
+                    fontSize:7,padding:"2px 6px",borderRadius:3,
+                    background:m.direction==="up"?"var(--green)22":"var(--red)22",
+                    color:m.direction==="up"?"var(--green)":"var(--red)",
+                    border:`1px solid ${m.direction==="up"?"var(--green)44":"var(--red)44"}`,
+                    fontFamily:"'Barlow Condensed'",letterSpacing:.5,
+                  }}>
+                    {m.symbol} {m.direction==="up"?"+":""}{m.change_pct}%
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{display:"flex",border:"1px solid var(--border2)",borderRadius:4,overflow:"hidden"}}>
+            {[["auto","AUTO"],["beginner","SIMPLE"],["expert","EXPERT"]].map(([v,l])=>(
+              <button key={v} onClick={()=>setMode(v)} style={{
+                background:mode===v?"var(--blue)22":"transparent",border:"none",
+                padding:"3px 8px",color:mode===v?"var(--blue)":"var(--text3)",fontSize:7,letterSpacing:.5
+              }}>{l}</button>
+            ))}
+          </div>
+          {onClose&&<button onClick={onClose} style={{background:"none",border:"none",color:"var(--text3)",fontSize:16,lineHeight:1}}>×</button>}
+        </div>
+      </div>
+
+      {/* Split pane */}
+      <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",overflow:"hidden",minHeight:0}}>
+
+        {/* LEFT — Sebastian */}
+        <div style={{borderRight:"1px solid var(--border2)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{padding:"8px 12px",borderBottom:"1px solid var(--blue)22",background:"var(--bg2)",flexShrink:0}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"var(--blue)",letterSpacing:1.5}}>SEBASTIAN</div>
+            <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>Analyst · Live prices · Catalyst chain · Perplexity verification · Mover flags</div>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:7}}>
+            {renderMessages(sebMessages,"SEBASTIAN","var(--blue)")}
+            {sebLoading&&(
+              <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"7px 12px"}}>
+                <span style={{fontSize:9,color:"var(--blue)",animation:"pulse 1.2s infinite"}}>Sebastian is loading the intelligence chain...</span>
+              </div>
+            )}
+            <div ref={sebBottomRef}/>
+          </div>
+
+          {sebMessages.length<=2&&!sebLoading&&(
+            <div style={{padding:"0 12px 5px",display:"flex",flexWrap:"wrap",gap:3,flexShrink:0}}>
+              {[
+                "Walk me through the top catalyst in full",
+                "Which sectors are showing the strongest signals?",
+                "What are the Perplexity contradictions right now?",
+                "Break down the wave states across the chain",
+                "What should I be watching most closely today?",
+                "Any cross-asset alignment in the current signals?",
+              ].map(q=>(
+                <button key={q} onClick={()=>sendSebastian(q)} style={{
+                  background:"var(--bg3)",border:"1px solid var(--blue)33",
+                  borderRadius:4,padding:"3px 7px",color:"var(--blue)",fontSize:7.5,cursor:"pointer",
+                }}>{q}</button>
+              ))}
+            </div>
+          )}
+
+          <div style={{padding:"7px 10px",borderTop:"1px solid var(--border)",display:"flex",gap:5,flexShrink:0,background:"var(--bg1)"}}>
+            <input
+              className="input-dark"
+              value={sebInput}
+              onChange={e=>setSebInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendSebastian()}
+              placeholder="Ask Sebastian about catalysts, signals, movers, wave states..."
+              style={{flex:1,fontSize:9}}
+            />
+            <button
+              onClick={()=>sendSebastian()}
+              disabled={!sebInput.trim()||sebLoading}
+              style={{
+                background:sebInput.trim()&&!sebLoading?"var(--blue)22":"var(--bg3)",
+                border:`1px solid ${sebInput.trim()&&!sebLoading?"var(--blue)55":"var(--border)"}`,
+                borderRadius:4,padding:"5px 11px",
+                color:sebInput.trim()&&!sebLoading?"var(--blue)":"var(--text3)",
+                fontSize:8,flexShrink:0,
+              }}
+            >SEND →</button>
+          </div>
+        </div>
+
+        {/* RIGHT — Persona Bot */}
+        <div style={{display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{padding:"8px 12px",borderBottom:"1px solid var(--purple)22",background:"var(--bg2)",flexShrink:0}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"var(--purple)",letterSpacing:1.5}}>PERSONA BOT</div>
+            <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>
+              Trading-style interpreter · Reads Sebastian's intelligence · Suggests prompts based on what Sebastian surfaces
+            </div>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:7}}>
+            {perMessages.length===0&&!perLoading&&(
+              <div style={{
+                alignSelf:"flex-start",maxWidth:"90%",
+                background:"var(--bg3)",border:"1px solid var(--purple)33",
+                borderRadius:6,padding:"10px 12px",
+              }}>
+                <div style={{fontSize:7,color:"var(--purple)",letterSpacing:1,marginBottom:4}}>PERSONA BOT</div>
+                <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65}}>
+                  I read what Sebastian surfaces and interpret it through a trading style of your choice.{"\n\n"}
+                  Ask Sebastian a question first — then ask me how a momentum trader, macro swing trader, contrarian, or any other style would read what he found.{"\n\n"}
+                  My suggested questions update automatically as Sebastian's analysis develops.
+                </div>
+              </div>
+            )}
+            {renderMessages(perMessages,"PERSONA BOT","var(--purple)")}
+            {perLoading&&(
+              <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"7px 12px"}}>
+                <span style={{fontSize:9,color:"var(--purple)",animation:"pulse 1.2s infinite"}}>Persona Bot is interpreting Sebastian's intelligence...</span>
+              </div>
+            )}
+            <div ref={perBottomRef}/>
+          </div>
+
+          {/* Dynamic suggested prompts — update after every Sebastian message */}
+          <div style={{padding:"0 12px 5px",display:"flex",flexWrap:"wrap",gap:3,flexShrink:0}}>
+            {personaSuggested.map(q=>(
+              <button key={q} onClick={()=>sendPersona(q)} style={{
+                background:"var(--bg3)",border:"1px solid var(--purple)33",
+                borderRadius:4,padding:"3px 7px",color:"var(--purple)",fontSize:7.5,cursor:"pointer",
+              }}>{q}</button>
+            ))}
+          </div>
+
+          <div style={{padding:"7px 10px",borderTop:"1px solid var(--border)",display:"flex",gap:5,flexShrink:0,background:"var(--bg1)"}}>
+            <input
+              className="input-dark"
+              value={perInput}
+              onChange={e=>setPerInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendPersona()}
+              placeholder="How would a momentum trader / macro swing / contrarian read this..."
+              style={{flex:1,fontSize:9}}
+            />
+            <button
+              onClick={()=>sendPersona()}
+              disabled={!perInput.trim()||perLoading}
+              style={{
+                background:perInput.trim()&&!perLoading?"var(--purple)22":"var(--bg3)",
+                border:`1px solid ${perInput.trim()&&!perLoading?"var(--purple)55":"var(--border)"}`,
+                borderRadius:4,padding:"5px 11px",
+                color:perInput.trim()&&!perLoading?"var(--purple)":"var(--text3)",
+                fontSize:8,flexShrink:0,
+              }}
+            >SEND →</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+
+  if(asModal){
+    return(
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-box" style={{width:"96%",maxWidth:1200,height:"84vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+          {pageContent}
+        </div>
+      </div>
+    );
+  }
+  return pageContent;
+}
+
+
+// ─────────────────────────────────────────────────────────────
+//  SEBASTIAN MODAL  (from asset card — kept for asset context)
+// ─────────────────────────────────────────────────────────────
+function SebastianModal({asset,intel,fmtMoney,onClose}){
+  const[messages,setMessages]=useState([]);
+  const[input,setInput]=useState("");
+  const[loading,setLoading]=useState(false);
+  const wc=WAVE_CFG[intel.wave]||WAVE_CFG.spark;
+  const bottomRef=useRef(null);
+
+  useEffect(()=>{
+    setMessages([{role:"assistant",content:`Hi! Let me break down what I'm seeing with **${asset.ticker}**.\n\n${intel.sbPrompt}\n\nHere's the quick picture:\n\n• **Wave state:** ${intel.wave.toUpperCase()} — ${WAVE_CFG[intel.wave]?.label}\n• **Confidence:** ${intel.confidence}% (${intel.confidence>=72?"strong":"developing"} signal)\n• **${intel.signals.length} intelligence sources** are active\n\nWhat would you like to understand better?`}]);
+  },[]);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
+
+  const send=async()=>{
+    if(!input.trim()||loading)return;
+    const userMsg={role:"user",content:input.trim()};
+    setMessages(p=>[...p,userMsg]);
+    setInput("");
+    setLoading(true);
+    try{
+      // Build asset context for Sebastian
+      const assetContext=`Current asset: ${asset.ticker} (${asset.name}) — ${asset.sector}/${asset.sub}\nPrice: ${fmtMoney(intel.price)} | Change: ${fmtPct(intel.changePct)}\nWave: ${intel.wave} | Confidence: ${intel.confidence}% | Bias: ${intel.bias}\nSignals: ${intel.signals.map(s=>`${s.bot}: ${s.text}`).join("; ")}`;
+      const result=await callSebastian(input.trim(),messages.slice(-8),"auto",{asset_context:assetContext});
+      const reply=typeof result==="string"?result:result.response;
+      setMessages(p=>[...p,{role:"assistant",content:reply,agent:"sebastian"}]);
+    }catch(e){
+      setMessages(p=>[...p,{role:"assistant",content:`I had trouble with that request. Error: ${e.message}. Please try again.`}]);
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{width:"100%",maxWidth:580,height:"78vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{padding:"12px 14px",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed'",fontSize:14,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>ASK SEBASTIAN</div>
+            <div style={{fontSize:8,color:"#3a3a60",marginTop:1}}>{asset.ticker} · {intel.wave.toUpperCase()} · {intel.confidence}% confidence</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <WaveBadge wave={intel.wave}/>
+            <button onClick={onClose} style={{background:"none",border:"none",color:"#3a3a60",fontSize:16,lineHeight:1}}>×</button>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div style={{flex:1,overflowY:"auto",padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
+          {messages.map((m,i)=>(
+            <div key={i} style={{
+              alignSelf:m.role==="user"?"flex-end":"flex-start",
+              maxWidth:"85%",
+              background:m.role==="user"?"#1e3a5f":"var(--bg3)",
+              border:`1px solid ${m.role==="user"?"#3d9eff44":"var(--border)"}`,
+              borderRadius:6,padding:"8px 10px",
+              animation:"fadeUp 0.15s ease",
+            }}>
+              <div style={{fontSize:9,color:m.role==="user"?"#3d9eff":"#3a3a60",letterSpacing:1,marginBottom:3}}>{m.role==="user"?"YOU":"SEBASTIAN"}</div>
+              <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div>
+            </div>
+          ))}
+          {loading&&(
+            <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"8px 12px"}}>
+              <span style={{fontSize:10,color:"#3a3a60",animation:"pulse 1.2s infinite"}}>Sebastian is thinking...</span>
+            </div>
+          )}
+          <div ref={bottomRef}/>
+        </div>
+
+        {/* Suggested questions */}
+        {messages.length<2&&(
+          <div style={{padding:"0 14px 8px",display:"flex",flexWrap:"wrap",gap:4,flexShrink:0}}>
+            {[
+              `What's driving ${asset.ticker} right now?`,
+              "Is this a good entry point?",
+              "What's the biggest risk here?",
+              "Explain the wave state to me",
+              "What would change your view?",
+            ].map(q=>(
+              <button key={q} onClick={()=>setInput(q)} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:4,padding:"4px 8px",color:"#5a5a8a",fontSize:8,cursor:"pointer"}}>
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input */}
+        <div style={{padding:"8px 12px",borderTop:"1px solid var(--border)",display:"flex",gap:6,flexShrink:0,background:"var(--bg1)"}}>
+          <input
+            className="input-dark"
+            value={input}
+            onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&send()}
+            placeholder="Ask anything about this asset..."
+            style={{flex:1}}
+          />
+          <button
+            onClick={send}
+            disabled={!input.trim()||loading}
+            style={{background:input.trim()&&!loading?"#1e3a5f":"var(--bg3)",border:`1px solid ${input.trim()&&!loading?"#3d9eff44":"var(--border)"}`,borderRadius:4,padding:"6px 12px",color:input.trim()&&!loading?"#3d9eff":"#2e2e50",fontSize:9,flexShrink:0}}
+          >
+            SEND →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  AUTH PAGES
+// ─────────────────────────────────────────────────────────────
+function AuthPage({onAuth}){
+  const[mode,setMode]=useState("home");
+  const[form,setForm]=useState({name:"",email:"",password:""});
+  const[error,setError]=useState("");
+  const[loading,setLoading]=useState(false);
+  const set=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+
+  const submit=async()=>{
+    setError("");setLoading(true);
+    try{
+      const path=mode==="signup"?"/api/auth/register":"/api/auth/login";
+      const body=mode==="signup"?{name:form.name,email:form.email,password:form.password}:{email:form.email,password:form.password};
+      const j=await api(path,{method:"POST",body:JSON.stringify(body)});
+      localStorage.setItem("mb_token",j.token);
+      onAuth(j.user);
+    }catch(e){setError(e.message);}
+    setLoading(false);
+  };
+
+  if(mode==="home")return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"var(--bg0)",overflow:"auto"}}>
+      <div style={{padding:"14px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:18,fontWeight:900,letterSpacing:3}}>MARKET <span style={{color:"var(--blue)"}}>BRAIN</span></div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={()=>setMode("login")} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:4,padding:"5px 12px",color:"var(--text2)",fontSize:9,letterSpacing:.5}}>LOG IN</button>
+          <button onClick={()=>setMode("signup")} style={{background:"#1e3a5f",border:"1px solid var(--blue)",borderRadius:4,padding:"5px 12px",color:"var(--blue)",fontSize:9,letterSpacing:.5}}>SIGN UP</button>
+        </div>
+      </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"48px 20px",textAlign:"center"}}>
+        <div style={{fontSize:8,color:"var(--blue)",letterSpacing:3,marginBottom:12}}>● LIVE INTELLIGENCE · {ASSETS.length}+ ASSETS</div>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:52,fontWeight:900,lineHeight:1,marginBottom:14,letterSpacing:1}}>
+          <span style={{color:"#e0e4ff"}}>MARKET INTELLIGENCE</span><br/>
+          <span style={{background:"linear-gradient(90deg,var(--blue),var(--green))",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>AT EVERY LEVEL.</span>
+        </div>
+        <div style={{fontSize:11,color:"var(--text2)",maxWidth:440,lineHeight:1.8,marginBottom:36}}>
+          Nine research bots. One chief of staff. Real-time wave analysis. Market Brain turns market complexity into clear, actionable intelligence — for nervous beginners and experienced traders alike.
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",marginBottom:48}}>
+          <button onClick={()=>setMode("signup")} style={{background:"linear-gradient(135deg,var(--blue),#0065cc)",border:"none",borderRadius:6,padding:"12px 28px",color:"#fff",fontSize:10,letterSpacing:1.5,fontWeight:600,boxShadow:"0 0 30px #3d9eff33"}}>GET STARTED FREE →</button>
+          <button onClick={()=>setMode("login")} style={{background:"transparent",border:"1px solid var(--border2)",borderRadius:6,padding:"12px 28px",color:"var(--text2)",fontSize:10,letterSpacing:1.5}}>LOG IN</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,maxWidth:780,width:"100%"}}>
+          {[
+            {icon:"◈",title:"9 Research Bots",desc:"Geo, macro, earnings, fundamentals, news, technical, insider, analyst, hiring"},
+            {icon:"◉",title:"Wave Intelligence",desc:"Spark → Confirmed → Escalation → Structural → Regime with evidence gating"},
+            {icon:"◎",title:"Sebastian AI",desc:"Ask questions about any asset in plain English — or dive into full technical depth"},
+            {icon:"⊕",title:"Live Prices",desc:"Real-time Yahoo Finance prices across stocks, crypto, forex, metals and more"},
+          ].map(f=>(
+            <div key={f.title} style={{background:"var(--bg1)",border:"1px solid var(--border)",borderRadius:6,padding:"14px",textAlign:"left"}}>
+              <div style={{fontSize:18,color:"var(--blue)",marginBottom:6,fontFamily:"monospace"}}>{f.icon}</div>
+              <div style={{fontSize:11,fontWeight:600,color:"#c8cce8",marginBottom:4}}>{f.title}</div>
+              <div style={{fontSize:9,color:"var(--text2)",lineHeight:1.6}}>{f.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const isSignup=mode==="signup";
+  return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16,background:"var(--bg0)"}}>
+      <div style={{width:"100%",maxWidth:360,animation:"fadeUp 0.25s ease"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontSize:22,fontWeight:900,letterSpacing:3}}>MARKET <span style={{color:"var(--blue)"}}>BRAIN</span></div>
+          <div style={{fontSize:9,color:"var(--text2)",marginTop:3}}>{isSignup?"Create your account":"Welcome back"}</div>
+        </div>
+        <div style={{background:"var(--bg1)",border:"1px solid var(--border2)",borderRadius:8,padding:22}}>
+          {isSignup&&<div style={{marginBottom:12}}><div style={{fontSize:7,color:"var(--text3)",letterSpacing:2,marginBottom:4}}>NAME</div><input value={form.name} onChange={set("name")} placeholder="Your name" className="input-dark"/></div>}
+          <div style={{marginBottom:12}}><div style={{fontSize:7,color:"var(--text3)",letterSpacing:2,marginBottom:4}}>EMAIL</div><input value={form.email} onChange={set("email")} type="email" placeholder="you@example.com" className="input-dark"/></div>
+          <div style={{marginBottom:18}}><div style={{fontSize:7,color:"var(--text3)",letterSpacing:2,marginBottom:4}}>PASSWORD</div><input value={form.password} onChange={set("password")} type="password" placeholder={isSignup?"Min 6 characters":"Your password"} className="input-dark" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+          {error&&<div style={{background:"#ff4d6a18",border:"1px solid #ff4d6a44",borderRadius:4,padding:"7px 10px",fontSize:9,color:"#ff8090",marginBottom:12}}>{error}</div>}
+          <button onClick={submit} disabled={loading} style={{width:"100%",background:loading?"var(--bg3)":"linear-gradient(135deg,var(--blue),#0065cc)",border:"none",borderRadius:5,padding:"10px",color:loading?"var(--text3)":"#fff",fontSize:10,letterSpacing:1,fontWeight:600}}>{loading?"...":(isSignup?"CREATE ACCOUNT":"LOG IN")}</button>
+          <div style={{textAlign:"center",marginTop:12,fontSize:8,color:"var(--text2)"}}>
+            {isSignup?"Have an account? ":"No account? "}
+            <span onClick={()=>{setMode(isSignup?"login":"signup");setError("");}} style={{color:"var(--blue)",cursor:"pointer"}}>{isSignup?"Log in":"Sign up free"}</span>
+          </div>
+        </div>
+        <button onClick={()=>setMode("home")} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:"var(--text3)",fontSize:8}}>← Back</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  MAIN APP
+// ─────────────────────────────────────────────────────────────
+function MainApp({user,onLogout}){
+  const[intel,setIntel]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[liveCount,setLiveCount]=useState(0);
+  const[fxRates,setFxRates]=useState(null);
+  const[lastUpdated,setLastUpdated]=useState(null);
+  const[selected,setSelected]=useState(null);
+  const[filterSector,setFilterSector]=useState("All");
+  const[filterCap,setFilterCap]=useState("All");
+  const[filterWave,setFilterWave]=useState("All");
+  const[filterBias,setFilterBias]=useState("All");
+  const[sortMode,setSortMode]=useState("confidence");
+  const[searchQ,setSearchQ]=useState("");
+  const[currency,setCurrency]=useState(CURRENCIES[0]);
+  const[watchlist,setWatchlist]=useState([]);
+  const[showCurrModal,setShowCurrModal]=useState(false);
+  const[sebastianTarget,setSebastianTarget]=useState(null);
+  const[saving,setSaving]=useState(false);
+  const[activeView,setActiveView]=useState("intel"); // intel | catalysts | sebastian
+  const sessionKeyRef=useRef(Date.now());
+
+  // Load portfolio
+  useEffect(()=>{
+    api("/api/portfolio").then(p=>{if(p.watchItems)setWatchlist(p.watchItems);}).catch(()=>{});
+  },[]);
+
+  // Auto-save
+  const savePortfolio=useCallback(async(w)=>{
+    setSaving(true);
+    try{await api("/api/portfolio",{method:"POST",body:JSON.stringify({trades:[],watchItems:w,balance:1000,startBalance:1000})});}
+    catch{}
+    setSaving(false);
+  },[]);
+  useEffect(()=>{const t=setTimeout(()=>savePortfolio(watchlist),2500);return()=>clearTimeout(t);},[watchlist]);
+
+  // FX
+  const toLocal=useCallback((usd)=>{
+    let rate;
+    if(fxRates?.USD&&fxRates[currency.code]!==undefined)rate=fxRates[currency.code]/fxRates.USD;
+    else rate=currency.fb/1.27;
+    return parseFloat((usd*rate).toFixed(4));
+  },[fxRates,currency]);
+  const fmtMoney=useCallback((usd)=>{
+    const v=toLocal(usd);
+    return`${currency.symbol}${v>=10000?v.toFixed(0):v>=100?v.toFixed(2):v>=1?v.toFixed(2):v.toFixed(4)}`;
+  },[toLocal,currency]);
+
+  // Refresh
+  const doRefresh=useCallback(async()=>{
+    const key=sessionKeyRef.current;
+    const fresh={};
+    ASSETS.forEach(a=>{fresh[a.ticker]=generateIntelligence(a,key);});
+    try{
+      const[liveData,liveFx]=await Promise.all([fetchLivePrices(ASSETS.map(a=>a.ticker)),fetchFxRates()]);
+      if(liveFx)setFxRates(liveFx);
+      if(liveData){
+        let cnt=0;
+        ASSETS.forEach(a=>{
+          const merged=mergeLive(fresh[a.ticker],liveData,a.ticker);
+          fresh[a.ticker]=merged;
+          if(merged.livePrice)cnt++;
+        });
+        setLiveCount(cnt);
+      }
+    }catch{}
+    setIntel(fresh);
+    setLastUpdated(new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}));
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{doRefresh();},[]);
+  useEffect(()=>{const t=setInterval(doRefresh,30000);return()=>clearInterval(t);},[]);
+
+  // Filtered + sorted
+  const filtered=useMemo(()=>
+    ASSETS.filter(a=>{
+      if(!intel[a.ticker])return false;
+      const sig=intel[a.ticker];
+      if(filterSector!=="All"&&a.sector!==filterSector)return false;
+      if(filterCap!=="All"&&a.cap!==filterCap)return false;
+      if(filterWave!=="All"&&sig.wave!==filterWave)return false;
+      if(filterBias!=="All"&&sig.bias!==filterBias)return false;
+      if(searchQ){const q=searchQ.toLowerCase();if(!a.ticker.toLowerCase().includes(q)&&!a.name.toLowerCase().includes(q)&&!a.sector.toLowerCase().includes(q))return false;}
+      return true;
+    }).sort((a,b)=>{
+      const sa=intel[a.ticker],sb=intel[b.ticker];
+      if(sortMode==="confidence")return sb.confidence-sa.confidence;
+      if(sortMode==="wave")return WAVE_STATES.indexOf(sb.wave)-WAVE_STATES.indexOf(sa.wave);
+      if(sortMode==="intensity")return sb.intensity-sa.intensity;
+      if(sortMode==="change")return(sb.changePct||0)-(sa.changePct||0);
+      if(sortMode==="change_neg")return(sa.changePct||0)-(sb.changePct||0);
+      return 0;
+    })
+  ,[intel,filterSector,filterCap,filterWave,filterBias,sortMode,searchQ]);
+
+  const watchedTickers=new Set(watchlist.map(w=>w.ticker));
+  const escalatingCount=Object.values(intel).filter(i=>["escalation","structural","regime"].includes(i.wave)).length;
+
+  if(loading)return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
+      <div style={{width:36,height:36,border:"2px solid var(--border2)",borderTop:"2px solid var(--blue)",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontSize:9,color:"var(--text3)",letterSpacing:2}}>LOADING INTELLIGENCE...</div>
+    </div>
+  );
+
+  return(
+    <div style={{height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+      {/* Currency modal */}
+      {showCurrModal&&(
+        <div className="modal-overlay" onClick={()=>setShowCurrModal(false)}>
+          <div className="modal-box" style={{width:"100%",maxWidth:300,padding:8}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:8,color:"var(--text3)",letterSpacing:2,padding:"8px 8px 4px"}}>SELECT CURRENCY</div>
+            {CURRENCIES.map(c=>{
+              const isA=c.code===currency.code;
+              return(
+                <div key={c.code} onClick={()=>{setCurrency(c);setShowCurrModal(false);}} style={{display:"flex",gap:10,alignItems:"center",padding:"8px",borderRadius:4,cursor:"pointer",background:isA?"var(--bg3)":"transparent",marginBottom:2}}>
+                  <span style={{fontSize:16}}>{c.flag}</span>
+                  <span style={{fontSize:11,fontWeight:600,color:isA?"var(--blue)":"var(--text)",fontFamily:"monospace"}}>{c.code}</span>
+                  <span style={{fontSize:9,color:"var(--text3)",flex:1}}>{c.symbol}</span>
+                  {isA&&<span style={{color:"var(--blue)",fontSize:10}}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Sebastian modal */}
+      {sebastianTarget&&(
+        <SebastianModal
+          asset={sebastianTarget.asset}
+          intel={sebastianTarget.intel}
+          fmtMoney={fmtMoney}
+          onClose={()=>setSebastianTarget(null)}
+        />
+      )}
+
+      {/* ── HEADER ── */}
+      <div style={{borderBottom:"1px solid var(--border)",padding:"6px 12px",display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap",background:"var(--bg1)"}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:17,fontWeight:900,letterSpacing:2,color:"#e0e4ff"}}>
+          MARKET <span style={{color:"var(--blue)"}}>BRAIN</span>
+        </div>
+        <div style={{height:16,width:1,background:"var(--border)",flexShrink:0}}/>
+        <div style={{display:"flex",gap:5,flex:1,flexWrap:"wrap",alignItems:"center"}}>
+          {/* Summary chips */}
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 8px",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>ESCALATING</span>
+            <span style={{fontSize:10,color:"#f5c842",fontWeight:600,fontFamily:"monospace"}}>{escalatingCount}</span>
+          </div>
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 8px",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>LIVE</span>
+            <span style={{fontSize:10,color:liveCount>0?"var(--green)":"var(--text3)",fontWeight:600,fontFamily:"monospace"}}>{liveCount}</span>
+          </div>
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 8px",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:7,color:"var(--text3)",letterSpacing:1}}>WATCHED</span>
+            <span style={{fontSize:10,color:"#f5c842",fontWeight:600,fontFamily:"monospace"}}>{watchlist.length}</span>
+          </div>
+          {saving&&<span style={{fontSize:7,color:"var(--text3)"}}>saving...</span>}
+        </div>
+        <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:"auto"}}>
+          <button onClick={()=>setShowCurrModal(true)} style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:4,padding:"3px 8px",display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:12}}>{currency.flag}</span>
+            <span style={{fontSize:8,color:"var(--blue)",fontWeight:600}}>{currency.code}</span>
+          </button>
+          <button onClick={doRefresh} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:4,padding:"3px 7px",color:"var(--text2)",fontSize:11}}>↻</button>
+          <span style={{fontSize:8,color:"var(--text3)"}}>Hi, {user.name.split(" ")[0]}</span>
+          <button onClick={async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem("mb_token");onLogout();}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:4,padding:"3px 7px",color:"var(--text3)",fontSize:7,letterSpacing:.5}}>OUT</button>
+        </div>
+      </div>
+
+      {/* ── VIEW TABS ── */}
+      <div style={{borderBottom:"1px solid var(--border)",padding:"0 12px",display:"flex",gap:0,flexShrink:0,background:"var(--bg2)"}}>
+        {[
+          ["intel","◈ ASSETS"],
+          ["catalysts","◉ CATALYSTS"],
+          ["sebastian","◎ SEBASTIAN"],
+        ].map(([v,l])=>(
+          <button key={v} onClick={()=>setActiveView(v)} style={{
+            background:"transparent",
+            border:"none",
+            borderBottom:`2px solid ${activeView===v?"var(--blue)":"transparent"}`,
+            padding:"8px 14px",
+            color:activeView===v?"var(--blue)":"var(--text3)",
+            fontSize:9,
+            letterSpacing:1,
+            whiteSpace:"nowrap",
+            transition:"all 0.15s",
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── FILTER BAR (only for intel view) ── */}
+      {activeView==="intel"&&<div style={{borderBottom:"1px solid var(--border)",padding:"5px 12px",background:"var(--bg1)",flexShrink:0}}>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
+          {/* Search */}
+          <input
+            value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+            placeholder="search ticker / name..."
+            className="input-dark"
+            style={{width:130,padding:"3px 8px",fontSize:9}}
+          />
+          {/* Sector */}
+          <div style={{height:16,width:1,background:"var(--border)",margin:"0 3px"}}/>
+          {SECTORS.map(s=>(
+            <button key={s} className={`pill${filterSector===s?" active":""}`} onClick={()=>setFilterSector(s)}>
+              {s==="All"?"ALL SECTORS":s.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+          {/* Cap */}
+          {CAPS_ORDER.map(c=>(
+            <button key={c} className={`pill${filterCap===c?" active":""}`} onClick={()=>setFilterCap(c)} style={filterCap===c?{borderColor:CAP_COLORS[c]||"var(--border2)",color:CAP_COLORS[c]||"var(--text)"}:{}}>
+              {c==="All"?"ALL CAPS":c.toUpperCase()}
+            </button>
+          ))}
+          <div style={{height:16,width:1,background:"var(--border)",margin:"0 3px"}}/>
+          {/* Wave filter */}
+          {["All",...WAVE_STATES].map(w=>(
+            <button key={w} className={`pill${filterWave===w?" active":""}`} onClick={()=>setFilterWave(w)} style={filterWave===w&&w!=="All"?{borderColor:WAVE_CFG[w]?.color+"66",color:WAVE_CFG[w]?.color}:{}}>
+              {w==="All"?"ALL WAVES":(WAVE_CFG[w]?.label||w.toUpperCase())}
+            </button>
+          ))}
+          <div style={{height:16,width:1,background:"var(--border)",margin:"0 3px"}}/>
+          {/* Bias */}
+          {["All","bullish","neutral","bearish"].map(b=>(
+            <button key={b} className={`pill${filterBias===b?" active":""}`} onClick={()=>setFilterBias(b)}>
+              {b==="All"?"ALL BIAS":b.toUpperCase()}
+            </button>
+          ))}
+          <div style={{marginLeft:"auto",display:"flex",gap:3}}>
+            {[["confidence","CONF"],["wave","WAVE"],["intensity","INT"],["change","TOP ▲"],["change_neg","TOP ▼"]].map(([v,l])=>(
+              <button key={v} className={`pill${sortMode===v?" active":""}`} onClick={()=>setSortMode(v)}>{l}</button>
+            ))}
+          </div>
+        </div>
+      </div>}
+
+      {/* ── CATALYST VIEW ── */}
+      {activeView==="catalysts"&&(
+        <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+          <CatalystView fmtMoney={fmtMoney}/>
+        </div>
+      )}
+
+      {/* ── SEBASTIAN VIEW ── */}
+      {activeView==="sebastian"&&(
+        <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+          <SebastianPage/>
+        </div>
+      )}
+
+      {/* ── INTEL ASSET GRID ── */}
+      {activeView==="intel"&&<div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+
+        {/* Cards grid */}
+        <div style={{flex:1,overflowY:"auto",padding:"8px 10px"}}>
+          {/* Watchlist strip (if any) */}
+          {watchlist.length>0&&(
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:7,color:"#f5c842",letterSpacing:2,marginBottom:5}}>★ WATCHLIST ({watchlist.length})</div>
+              <div style={{display:"flex",gap:5,overflowX:"auto",paddingBottom:4}}>
+                {watchlist.map(w=>{
+                  const a=ASSETS.find(x=>x.ticker===w.ticker);
+                  const sig=a?intel[a.ticker]:null;
+                  if(!a||!sig)return null;
+                  const pch=sig.changePct||0;
+                  return(
+                    <div key={w.id} onClick={()=>setSelected(a)} style={{background:"var(--bg2)",border:"1px solid #f5c84222",borderRadius:5,padding:"5px 8px",cursor:"pointer",flexShrink:0,minWidth:100}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                        <span style={{fontSize:10,fontWeight:600,color:"#e0e4ff",fontFamily:"'Barlow Condensed'",letterSpacing:.3}}>{a.ticker}</span>
+                        <WaveBadge wave={sig.wave}/>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between"}}>
+                        <span style={{fontSize:9,color:"#c0c4e0",fontFamily:"monospace"}}>{fmtMoney(sig.price)}</span>
+                        <span style={{fontSize:8,color:pCol(pch)}}>{fmtPct(pch)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Results count */}
+          <div style={{fontSize:7,color:"var(--text3)",letterSpacing:1.5,marginBottom:6}}>
+            {filtered.length} ASSET{filtered.length!==1?"S":""} · {lastUpdated&&`Updated ${lastUpdated}`}
+          </div>
+
+          {/* Card grid */}
+          <div style={{
+            display:"grid",
+            gridTemplateColumns:`repeat(auto-fill,minmax(${selected?"150px":"160px"},1fr))`,
+            gap:5,
+          }}>
+            {filtered.map(a=>(
+              <IntelCard
+                key={a.ticker}
+                asset={a}
+                intel={intel[a.ticker]}
+                selected={selected?.ticker===a.ticker}
+                onSelect={()=>setSelected(prev=>prev?.ticker===a.ticker?null:a)}
+                fmtMoney={fmtMoney}
+                isWatching={watchedTickers.has(a.ticker)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Detail panel */}
+        {selected&&intel[selected.ticker]&&(
+          <div style={{width:300,borderLeft:"1px solid var(--border)",flexShrink:0,overflow:"hidden",display:"flex",flexDirection:"column",background:"var(--bg1)"}}>
+            {/* Panel header */}
+            <div style={{padding:"7px 10px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
+              <span style={{fontSize:7,color:"var(--text3)",letterSpacing:2}}>INTELLIGENCE DETAIL</span>
+              <button onClick={()=>setSelected(null)} style={{background:"none",border:"none",color:"var(--text3)",fontSize:14,lineHeight:1}}>×</button>
+            </div>
+            <DetailPanel
+              asset={selected}
+              intel={intel[selected.ticker]}
+              fmtMoney={fmtMoney}
+              isWatching={watchedTickers.has(selected.ticker)}
+              onWatch={(asset,sig)=>{
+                if(watchedTickers.has(asset.ticker)){
+                  setWatchlist(p=>p.filter(w=>w.ticker!==asset.ticker));
+                }else{
+                  setWatchlist(p=>[...p,{id:uid(),ticker:asset.ticker,name:asset.name,sector:asset.sector,cap:asset.cap,addedAt:Date.now(),entryPrice:sig.price,wave:sig.wave,confidence:sig.confidence}]);
+                }
+              }}
+              onAskSebastian={(asset,sig)=>setSebastianTarget({asset,intel:sig})}
+            />
+          </div>
+        )}
+      </div>}
+
+      {/* Status bar */}
+      <div style={{borderTop:"1px solid var(--border)",padding:"3px 12px",display:"flex",gap:10,alignItems:"center",flexShrink:0,background:"var(--bg1)"}}>
+        <span style={{fontSize:7,color:liveCount>0?"var(--green)":"var(--text3)",animation:liveCount>0?"pulse 2s infinite":"none"}}>
+          {liveCount>0?"● LIVE":"● SIM"}
+        </span>
+        <span style={{fontSize:7,color:"var(--text3)"}}>{liveCount} live prices · {ASSETS.length} assets tracked</span>
+        <span style={{fontSize:7,color:"var(--text3)",marginLeft:"auto"}}>Market Brain v7 · Not financial advice</span>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  ROOT
+// ─────────────────────────────────────────────────────────────
+function Root(){
+  const[user,setUser]=useState(null);
+  const[checking,setChecking]=useState(true);
+
+  useEffect(()=>{
+    const token=localStorage.getItem("mb_token");
+    if(!token){setChecking(false);return;}
+    api("/api/auth/me").then(u=>{setUser(u);setChecking(false);}).catch(()=>{localStorage.removeItem("mb_token");setChecking(false);});
+  },[]);
+
+  if(checking)return(
+    <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{width:28,height:28,border:"2px solid #111128",borderTop:"2px solid var(--blue)",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+    </div>
+  );
+  if(!user)return<AuthPage onAuth={u=>setUser(u)}/>;
+  return<MainApp user={user} onLogout={()=>setUser(null)}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>
