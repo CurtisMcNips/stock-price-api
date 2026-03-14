@@ -957,207 +957,251 @@ function CatalystView({fmtMoney}){
 //  SEBASTIAN PAGE  (full dedicated view + modal mode)
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
-//  CHAT PANE  — reusable for Sebastian or Persona Bot
+//  SEBASTIAN PAGE — split pane with linked intelligence
+//
+//  Architecture:
+//  - On open: fetch /api/sebastian/context (movers, catalysts, Perplexity)
+//  - Sebastian pane: auto-fires opening brief including movers >5%
+//  - Persona pane: reads Sebastian's last response as its primary context
+//  - Persona suggested prompts: regenerate after every Sebastian message
+//  - Both panes share the same live context snapshot
 // ─────────────────────────────────────────────────────────────
-function ChatPane({
-  agentKey,          // "sebastian" | "persona"
-  label,             // "SEBASTIAN" | "PERSONA BOT"
-  accentColor,       // var(--blue) | var(--purple)
-  callFn,            // callSebastian | callPersona
-  openingQuestion,   // string sent on mount to get the brief
-  suggestedQuestions,
-  mode,
-  initialContext={},
-}){
-  const[messages,setMessages]=useState([]);
-  const[input,setInput]=useState("");
-  const[loading,setLoading]=useState(false);
-  const bottomRef=useRef(null);
 
-  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
-
-  // Auto-fetch opening brief on mount
-  useEffect(()=>{
-    setLoading(true);
-    callFn(openingQuestion,[],mode,initialContext)
-      .then(result=>{
-        const reply=typeof result==="string"?result:result.response;
-        setMessages([{role:"assistant",content:reply}]);
-        setLoading(false);
-      })
-      .catch(()=>{
-        setMessages([{role:"assistant",content:agentKey==="sebastian"
-          ?"I have live prices and the intelligence chain loaded. Ask me anything about the market."
-          :"I'm ready to interpret the current situation through any trading style. What perspective would you like?"}]);
-        setLoading(false);
-      });
-  },[]);
-
-  const send=async(q)=>{
-    const question=(q||input).trim();
-    if(!question||loading)return;
-    setInput("");
-    setMessages(p=>[...p,{role:"user",content:question}]);
-    setLoading(true);
-    try{
-      const result=await callFn(question,messages.slice(-10),mode,initialContext);
-      const reply=typeof result==="string"?result:result.response;
-      setMessages(p=>[...p,{role:"assistant",content:reply}]);
-    }catch(e){
-      setMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message||"unknown"}. Please try again.`}]);
-    }
-    setLoading(false);
-  };
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
-
-      {/* Pane header */}
-      <div style={{
-        padding:"8px 12px",
-        borderBottom:`1px solid ${accentColor}33`,
-        background:"var(--bg2)",
-        flexShrink:0,
-      }}>
-        <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:accentColor,letterSpacing:1.5}}>
-          {label}
-        </div>
-        <div style={{fontSize:7,color:"var(--text3)",marginTop:1,letterSpacing:.5}}>
-          {agentKey==="sebastian"
-            ?"Analyst · Catalyst breakdown · Wave states · Verification · Risk framing"
-            :"Trading-style interpreter · How different traders read this market"}
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:7}}>
-        {messages.map((m,i)=>(
-          <div key={i} style={{
-            alignSelf:m.role==="user"?"flex-end":"flex-start",
-            maxWidth:"90%",
-            background:m.role==="user"?"#1a2a40":"var(--bg3)",
-            border:`1px solid ${m.role==="user"?accentColor+"44":"var(--border)"}`,
-            borderRadius:6,
-            padding:"7px 10px",
-            animation:"fadeUp 0.15s ease",
-          }}>
-            <div style={{fontSize:7,color:m.role==="user"?"var(--blue)":accentColor,letterSpacing:1,marginBottom:3}}>
-              {m.role==="user"?"YOU":label}
-            </div>
-            <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
-              {m.content}
-            </div>
-          </div>
-        ))}
-        {loading&&(
-          <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"7px 12px"}}>
-            <span style={{fontSize:9,color:accentColor,animation:"pulse 1.2s infinite"}}>
-              {label} is thinking...
-            </span>
-          </div>
-        )}
-        <div ref={bottomRef}/>
-      </div>
-
-      {/* Suggested questions */}
-      {messages.length<=2&&!loading&&(
-        <div style={{padding:"0 12px 5px",display:"flex",flexWrap:"wrap",gap:3,flexShrink:0}}>
-          {suggestedQuestions.map(q=>(
-            <button key={q} onClick={()=>send(q)} style={{
-              background:"var(--bg3)",border:`1px solid ${accentColor}33`,
-              borderRadius:4,padding:"3px 7px",
-              color:accentColor,fontSize:7.5,cursor:"pointer",
-            }}>{q}</button>
-          ))}
-        </div>
-      )}
-
-      {/* Input */}
-      <div style={{padding:"7px 10px",borderTop:"1px solid var(--border)",display:"flex",gap:5,flexShrink:0,background:"var(--bg1)"}}>
-        <input
-          className="input-dark"
-          value={input}
-          onChange={e=>setInput(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()}
-          placeholder={agentKey==="sebastian"
-            ?"Ask Sebastian about catalysts, signals, wave states..."
-            :"Ask how a momentum trader / macro swing trader / contrarian would read this..."}
-          style={{flex:1,fontSize:9}}
-        />
-        <button
-          onClick={()=>send()}
-          disabled={!input.trim()||loading}
-          style={{
-            background:input.trim()&&!loading?accentColor+"22":"var(--bg3)",
-            border:`1px solid ${input.trim()&&!loading?accentColor+"55":"var(--border)"}`,
-            borderRadius:4,padding:"5px 11px",
-            color:input.trim()&&!loading?accentColor:"var(--text3)",
-            fontSize:8,flexShrink:0,
-          }}
-        >SEND →</button>
-      </div>
-    </div>
-  );
-}
-
-
-// ─────────────────────────────────────────────────────────────
-//  SEBASTIAN PAGE — split pane: Sebastian left, Persona Bot right
-// ─────────────────────────────────────────────────────────────
 function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=false}){
   const[mode,setMode]=useState("auto");
 
-  const SEBASTIAN_OPENING = initialQuestion ||
-    "Give me a concise intelligence landscape overview right now. Cover: (1) the highest-wave catalyst and what's driving it, (2) which sectors are most active, (3) the overall market direction bias, and (4) the top 2-3 assets I should be watching. Keep it tight — 4-5 short paragraphs.";
+  // Shared intelligence context — fetched once on open, refreshed on Sebastian response
+  const[sbContext,setSbContext]=useState(null);   // raw /api/sebastian/context snapshot
+  const[sebastianLastMsg,setSebastianLastMsg]=useState(""); // last Sebastian response text
 
-  const PERSONA_OPENING =
-    "Give me a brief overview of the current market landscape interpreted through multiple trading styles. Cover: how a momentum trader would read the top catalyst, how a macro swing trader views the current sector rotation, and what a contrarian would flag about the highest-confidence signals. Keep it tight — one paragraph per style.";
+  // Sebastian pane state
+  const[sebMessages,setSebMessages]=useState([]);
+  const[sebInput,setSebInput]=useState(initialQuestion||"");
+  const[sebLoading,setSebLoading]=useState(false);
 
-  const SEBASTIAN_SUGGESTED=[
-    "What's the strongest signal right now?",
-    "Walk me through the top catalyst",
-    "Which sectors are most active?",
-    "Explain the current wave states",
-    "Any Perplexity contradictions I should know about?",
-    "What's the cross-asset alignment telling us?",
-  ];
+  // Persona pane state
+  const[perMessages,setPerMessages]=useState([]);
+  const[perInput,setPerInput]=useState("");
+  const[perLoading,setPerLoading]=useState(false);
+  const[personaSuggested,setPersonaSuggested]=useState([
+    "How would a momentum trader read the top catalyst?",
+    "How would a defensive allocator view this setup?",
+    "How would a macro swing trader approach current sector rotation?",
+    "How would a contrarian read these signals?",
+    "How would a geopolitical risk trader read Defence right now?",
+    "How would an event-driven trader position around this catalyst?",
+  ]);
 
-  const PERSONA_SUGGESTED=[
-    "How would a momentum trader read this?",
-    "How would a defensive allocator view this?",
-    "How would a macro swing trader approach this?",
-    "How would a contrarian interpret the top signal?",
-    "How would a geopolitical risk trader read current Defence?",
-    "How would an event-driven trader position around this?",
-  ];
+  const sebBottomRef=useRef(null);
+  const perBottomRef=useRef(null);
+
+  useEffect(()=>{sebBottomRef.current?.scrollIntoView({behavior:"smooth"});},[sebMessages]);
+  useEffect(()=>{perBottomRef.current?.scrollIntoView({behavior:"smooth"});},[perMessages]);
+
+  // ── On mount: fetch market context snapshot ──────────────────
+  useEffect(()=>{
+    api("/api/sebastian/context",{method:"GET"}).then(data=>{
+      setSbContext(data);
+    }).catch(()=>{});
+
+    // Auto-fire Sebastian opening brief
+    const openingQ = initialQuestion ||
+      "Give me the full market brief for right now. Lead with any tickers above 5% daily move (flag small/mid/large cap). Then give me the top catalyst breakdown, the active sector themes, and the overall intelligence chain bias. Be specific — prices, wave states, Perplexity verdicts.";
+    sendSebastian(openingQ, true);
+  },[]);
+
+  // ── Generate dynamic Persona suggested prompts from Sebastian's output ──
+  const generatePersonaSuggested=(sebastianText, contextData)=>{
+    // Extract key signals from Sebastian's response to build relevant prompts
+    const text=sebastianText.toLowerCase();
+    const suggestions=[];
+
+    // Catalyst-specific suggestions
+    if(text.includes("regime")||text.includes("structural")){
+      suggestions.push("How would a macro swing trader position around this structural signal?");
+      suggestions.push("How would a value investor read a regime-level catalyst?");
+    }
+    if(text.includes("escalation")||text.includes("confirmed")){
+      suggestions.push("How would a momentum trader interpret this escalating signal?");
+      suggestions.push("How would an event-driven trader time entry around this?");
+    }
+
+    // Sector-specific suggestions
+    if(text.includes("defence")||text.includes("defense")||text.includes("lmt")||text.includes("rtx")){
+      suggestions.push("How would a geopolitical risk trader read current Defence signals?");
+    }
+    if(text.includes("energy")||text.includes("oil")||text.includes("cl=f")||text.includes("bz=f")){
+      suggestions.push("How would a commodities specialist read the current energy setup?");
+    }
+    if(text.includes("tech")||text.includes("nvda")||text.includes("semiconductor")){
+      suggestions.push("How would a momentum trader read the tech signal right now?");
+    }
+    if(text.includes("shipping")||text.includes("zim")||text.includes("fro")){
+      suggestions.push("How would a macro swing trader view the shipping sector signal?");
+    }
+    if(text.includes("gold")||text.includes("gc=f")||text.includes("safe haven")){
+      suggestions.push("How would a risk-off allocator interpret the gold move?");
+    }
+    if(text.includes("crypto")||text.includes("btc")||text.includes("bitcoin")){
+      suggestions.push("How would a momentum trader read the current crypto signal?");
+    }
+
+    // Perplexity contradiction suggestions
+    if(text.includes("contradict")||text.includes("mixed")||text.includes("disputed")){
+      suggestions.push("How would a contrarian read these Perplexity contradictions?");
+      suggestions.push("How would a defensive allocator treat this verification conflict?");
+    }
+
+    // Mover-specific suggestions (from context)
+    if(contextData?.movers_5pct){
+      const allMovers=[
+        ...(contextData.movers_5pct.large||[]),
+        ...(contextData.movers_5pct.mid||[]),
+        ...(contextData.movers_5pct.small||[]),
+      ];
+      if(allMovers.length>0){
+        const top=allMovers[0];
+        suggestions.push(`How would a momentum trader interpret the ${top.symbol} ${top.change_pct>0?"+":""}${top.change_pct}% move?`);
+      }
+    }
+
+    // Always include at least some defaults if we don't have enough
+    const defaults=[
+      "How would a defensive allocator view this overall setup?",
+      "How would a quant / mean-reversion trader read current signal strength?",
+      "How would a contrarian approach the highest-confidence catalyst?",
+      "How would a risk-on/risk-off allocator read the current macro picture?",
+    ];
+
+    const merged=[...new Set([...suggestions,...defaults])].slice(0,6);
+    setPersonaSuggested(merged);
+  };
+
+  // ── Build Persona Bot context from Sebastian's intelligence ──
+  const buildPersonaContext=()=>{
+    let ctx={};
+    if(sbContext){
+      ctx.market_snapshot={
+        movers_5pct:   sbContext.movers_5pct,
+        mover_summary: sbContext.mover_summary,
+        hot_sectors:   sbContext.hot_sectors,
+        total_tickers: sbContext.total_tickers,
+        ts:            sbContext.ts,
+      };
+      ctx.top_catalysts=(sbContext.catalysts||[]).slice(0,5);
+    }
+    if(sebastianLastMsg){
+      ctx.sebastian_analysis=sebastianLastMsg.slice(0,2000);
+      ctx.sebastian_note="Sebastian has already surfaced this intelligence. Interpret it through the requested trading style without re-analysing from scratch.";
+    }
+    return ctx;
+  };
+
+  // ── Send to Sebastian ────────────────────────────────────────
+  const sendSebastian=async(q, isOpening=false)=>{
+    const question=(q||sebInput).trim();
+    if(!question||sebLoading)return;
+    if(!isOpening) setSebInput("");
+    if(!isOpening) setSebMessages(p=>[...p,{role:"user",content:question}]);
+    setSebLoading(true);
+    try{
+      const result=await callSebastian(question,sebMessages.slice(-10),mode,initialContext);
+      const reply=typeof result==="string"?result:result.response;
+      setSebMessages(p=>[...p,{role:"assistant",content:reply}]);
+      setSebastianLastMsg(reply);
+      // Refresh context snapshot and regenerate persona suggestions
+      api("/api/sebastian/context",{method:"GET"}).then(data=>{
+        setSbContext(data);
+        generatePersonaSuggested(reply,data);
+      }).catch(()=>generatePersonaSuggested(reply,sbContext));
+    }catch(e){
+      setSebMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message||"unknown"}. Please try again.`}]);
+    }
+    setSebLoading(false);
+  };
+
+  // ── Send to Persona Bot ──────────────────────────────────────
+  const sendPersona=async(q)=>{
+    const question=(q||perInput).trim();
+    if(!question||perLoading)return;
+    setPerInput("");
+    setPerMessages(p=>[...p,{role:"user",content:question}]);
+    setPerLoading(true);
+    try{
+      // Persona Bot always receives Sebastian's latest context
+      const personaCtx=buildPersonaContext();
+      const result=await callPersona(question,perMessages.slice(-10),mode,personaCtx);
+      const reply=typeof result==="string"?result:result.response;
+      setPerMessages(p=>[...p,{role:"assistant",content:reply}]);
+    }catch(e){
+      setPerMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message||"unknown"}. Please try again.`}]);
+    }
+    setPerLoading(false);
+  };
+
+  // ── Shared message renderer ──────────────────────────────────
+  const renderMessages=(messages,agentLabel,accentColor)=>(
+    messages.map((m,i)=>(
+      <div key={i} style={{
+        alignSelf:m.role==="user"?"flex-end":"flex-start",
+        maxWidth:"90%",
+        background:m.role==="user"?"#1a2a40":"var(--bg3)",
+        border:`1px solid ${m.role==="user"?accentColor+"44":"var(--border)"}`,
+        borderRadius:6,padding:"7px 10px",animation:"fadeUp 0.15s ease",
+      }}>
+        <div style={{fontSize:7,color:m.role==="user"?"var(--text3)":accentColor,letterSpacing:1,marginBottom:3}}>
+          {m.role==="user"?"YOU":agentLabel}
+        </div>
+        <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
+          {m.content}
+        </div>
+      </div>
+    ))
+  );
 
   const pageContent=(
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
 
       {/* Top bar */}
       <div style={{
-        padding:"7px 14px",
-        borderBottom:"1px solid var(--border2)",
+        padding:"7px 14px",borderBottom:"1px solid var(--border2)",
         display:"flex",justifyContent:"space-between",alignItems:"center",
         flexShrink:0,background:"var(--bg2)",
       }}>
-        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>
             INTELLIGENCE CHAT
           </div>
-          <div style={{fontSize:7,color:"var(--text3)"}}>
-            Two independent agents · Same live data · Ask them both
-          </div>
+          {sbContext&&sbContext.movers_5pct&&(()=>{
+            const all=[
+              ...(sbContext.movers_5pct.large||[]),
+              ...(sbContext.movers_5pct.mid||[]),
+              ...(sbContext.movers_5pct.small||[]),
+            ];
+            if(all.length===0) return null;
+            return(
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {all.slice(0,5).map(m=>(
+                  <span key={m.symbol} style={{
+                    fontSize:7,padding:"2px 6px",borderRadius:3,
+                    background:m.direction==="up"?"var(--green)22":"var(--red)22",
+                    color:m.direction==="up"?"var(--green)":"var(--red)",
+                    border:`1px solid ${m.direction==="up"?"var(--green)44":"var(--red)44"}`,
+                    fontFamily:"'Barlow Condensed'",letterSpacing:.5,
+                  }}>
+                    {m.symbol} {m.direction==="up"?"+":""}{m.change_pct}%
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          {/* Mode selector */}
           <div style={{display:"flex",border:"1px solid var(--border2)",borderRadius:4,overflow:"hidden"}}>
             {[["auto","AUTO"],["beginner","SIMPLE"],["expert","EXPERT"]].map(([v,l])=>(
               <button key={v} onClick={()=>setMode(v)} style={{
-                background:mode===v?"var(--blue)22":"transparent",
-                border:"none",padding:"3px 8px",
-                color:mode===v?"var(--blue)":"var(--text3)",
-                fontSize:7,letterSpacing:.5
+                background:mode===v?"var(--blue)22":"transparent",border:"none",
+                padding:"3px 8px",color:mode===v?"var(--blue)":"var(--text3)",fontSize:7,letterSpacing:.5
               }}>{l}</button>
             ))}
           </div>
@@ -1166,34 +1210,130 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
       </div>
 
       {/* Split pane */}
-      <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",gap:0,overflow:"hidden",minHeight:0}}>
+      <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",overflow:"hidden",minHeight:0}}>
 
         {/* LEFT — Sebastian */}
-        <div style={{borderRight:"1px solid var(--border2)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-          <ChatPane
-            agentKey="sebastian"
-            label="SEBASTIAN"
-            accentColor="var(--blue)"
-            callFn={callSebastian}
-            openingQuestion={SEBASTIAN_OPENING}
-            suggestedQuestions={SEBASTIAN_SUGGESTED}
-            mode={mode}
-            initialContext={initialContext}
-          />
+        <div style={{borderRight:"1px solid var(--border2)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{padding:"8px 12px",borderBottom:"1px solid var(--blue)22",background:"var(--bg2)",flexShrink:0}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"var(--blue)",letterSpacing:1.5}}>SEBASTIAN</div>
+            <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>Analyst · Live prices · Catalyst chain · Perplexity verification · Mover flags</div>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:7}}>
+            {renderMessages(sebMessages,"SEBASTIAN","var(--blue)")}
+            {sebLoading&&(
+              <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"7px 12px"}}>
+                <span style={{fontSize:9,color:"var(--blue)",animation:"pulse 1.2s infinite"}}>Sebastian is loading the intelligence chain...</span>
+              </div>
+            )}
+            <div ref={sebBottomRef}/>
+          </div>
+
+          {sebMessages.length<=2&&!sebLoading&&(
+            <div style={{padding:"0 12px 5px",display:"flex",flexWrap:"wrap",gap:3,flexShrink:0}}>
+              {[
+                "Walk me through the top catalyst in full",
+                "Which sectors are showing the strongest signals?",
+                "What are the Perplexity contradictions right now?",
+                "Break down the wave states across the chain",
+                "What should I be watching most closely today?",
+                "Any cross-asset alignment in the current signals?",
+              ].map(q=>(
+                <button key={q} onClick={()=>sendSebastian(q)} style={{
+                  background:"var(--bg3)",border:"1px solid var(--blue)33",
+                  borderRadius:4,padding:"3px 7px",color:"var(--blue)",fontSize:7.5,cursor:"pointer",
+                }}>{q}</button>
+              ))}
+            </div>
+          )}
+
+          <div style={{padding:"7px 10px",borderTop:"1px solid var(--border)",display:"flex",gap:5,flexShrink:0,background:"var(--bg1)"}}>
+            <input
+              className="input-dark"
+              value={sebInput}
+              onChange={e=>setSebInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendSebastian()}
+              placeholder="Ask Sebastian about catalysts, signals, movers, wave states..."
+              style={{flex:1,fontSize:9}}
+            />
+            <button
+              onClick={()=>sendSebastian()}
+              disabled={!sebInput.trim()||sebLoading}
+              style={{
+                background:sebInput.trim()&&!sebLoading?"var(--blue)22":"var(--bg3)",
+                border:`1px solid ${sebInput.trim()&&!sebLoading?"var(--blue)55":"var(--border)"}`,
+                borderRadius:4,padding:"5px 11px",
+                color:sebInput.trim()&&!sebLoading?"var(--blue)":"var(--text3)",
+                fontSize:8,flexShrink:0,
+              }}
+            >SEND →</button>
+          </div>
         </div>
 
         {/* RIGHT — Persona Bot */}
-        <div style={{overflow:"hidden",display:"flex",flexDirection:"column"}}>
-          <ChatPane
-            agentKey="persona"
-            label="PERSONA BOT"
-            accentColor="var(--purple)"
-            callFn={callPersona}
-            openingQuestion={PERSONA_OPENING}
-            suggestedQuestions={PERSONA_SUGGESTED}
-            mode={mode}
-            initialContext={initialContext}
-          />
+        <div style={{display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{padding:"8px 12px",borderBottom:"1px solid var(--purple)22",background:"var(--bg2)",flexShrink:0}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:"var(--purple)",letterSpacing:1.5}}>PERSONA BOT</div>
+            <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>
+              Trading-style interpreter · Reads Sebastian's intelligence · Suggests prompts based on what Sebastian surfaces
+            </div>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:7}}>
+            {perMessages.length===0&&!perLoading&&(
+              <div style={{
+                alignSelf:"flex-start",maxWidth:"90%",
+                background:"var(--bg3)",border:"1px solid var(--purple)33",
+                borderRadius:6,padding:"10px 12px",
+              }}>
+                <div style={{fontSize:7,color:"var(--purple)",letterSpacing:1,marginBottom:4}}>PERSONA BOT</div>
+                <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65}}>
+                  I read what Sebastian surfaces and interpret it through a trading style of your choice.{"\n\n"}
+                  Ask Sebastian a question first — then ask me how a momentum trader, macro swing trader, contrarian, or any other style would read what he found.{"\n\n"}
+                  My suggested questions update automatically as Sebastian's analysis develops.
+                </div>
+              </div>
+            )}
+            {renderMessages(perMessages,"PERSONA BOT","var(--purple)")}
+            {perLoading&&(
+              <div style={{alignSelf:"flex-start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:"7px 12px"}}>
+                <span style={{fontSize:9,color:"var(--purple)",animation:"pulse 1.2s infinite"}}>Persona Bot is interpreting Sebastian's intelligence...</span>
+              </div>
+            )}
+            <div ref={perBottomRef}/>
+          </div>
+
+          {/* Dynamic suggested prompts — update after every Sebastian message */}
+          <div style={{padding:"0 12px 5px",display:"flex",flexWrap:"wrap",gap:3,flexShrink:0}}>
+            {personaSuggested.map(q=>(
+              <button key={q} onClick={()=>sendPersona(q)} style={{
+                background:"var(--bg3)",border:"1px solid var(--purple)33",
+                borderRadius:4,padding:"3px 7px",color:"var(--purple)",fontSize:7.5,cursor:"pointer",
+              }}>{q}</button>
+            ))}
+          </div>
+
+          <div style={{padding:"7px 10px",borderTop:"1px solid var(--border)",display:"flex",gap:5,flexShrink:0,background:"var(--bg1)"}}>
+            <input
+              className="input-dark"
+              value={perInput}
+              onChange={e=>setPerInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendPersona()}
+              placeholder="How would a momentum trader / macro swing / contrarian read this..."
+              style={{flex:1,fontSize:9}}
+            />
+            <button
+              onClick={()=>sendPersona()}
+              disabled={!perInput.trim()||perLoading}
+              style={{
+                background:perInput.trim()&&!perLoading?"var(--purple)22":"var(--bg3)",
+                border:`1px solid ${perInput.trim()&&!perLoading?"var(--purple)55":"var(--border)"}`,
+                borderRadius:4,padding:"5px 11px",
+                color:perInput.trim()&&!perLoading?"var(--purple)":"var(--text3)",
+                fontSize:8,flexShrink:0,
+              }}
+            >SEND →</button>
+          </div>
         </div>
 
       </div>
@@ -1203,7 +1343,7 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
   if(asModal){
     return(
       <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-box" style={{width:"96%",maxWidth:1100,height:"82vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-box" style={{width:"96%",maxWidth:1200,height:"84vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
           {pageContent}
         </div>
       </div>
