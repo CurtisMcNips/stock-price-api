@@ -26,6 +26,14 @@ from pydantic import BaseModel, EmailStr
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+# Persona Bot — user-facing trading-style interpreter
+try:
+    from persona_bot import get_persona_chat_bot, PersonaChatBot
+    _PERSONA_AVAILABLE = True
+except ImportError:
+    _PERSONA_AVAILABLE = False
+    log.warning("persona_bot not found — /api/persona will be unavailable")
+
 # ── Config ────────────────────────────────────────────────────
 REDIS_URL       = os.environ.get("REDIS_URL", "redis://localhost:6379")
 SECRET_KEY      = os.environ.get("SECRET_KEY", "change-me-in-production-railway-env")
@@ -211,6 +219,13 @@ class SebastianRequest(BaseModel):
     history:  list = []
     mode:     str  = "auto"    # auto | beginner | expert
     context:  dict = {}        # optional extra context from frontend (asset_context, tickers, etc.)
+
+
+class PersonaRequest(BaseModel):
+    question: str
+    history:  list = []
+    mode:     str  = "auto"    # auto | beginner | expert
+    context:  dict = {}        # optional extra context (focused catalyst, asset focus, etc.)
 
 
 # ── Auth endpoints ────────────────────────────────────────────
@@ -588,60 +603,94 @@ async def _fetch_catalysts_for_sebastian() -> str:
 
 
 def _build_sebastian_system(
-    mode:         str,
-    live_prices:  str,
-    catalysts:    str,
+    mode:          str,
+    live_prices:   str,
+    catalysts:     str,
     extra_context: str = "",
 ) -> str:
     """
-    Build Sebastian's full system prompt with live context injected server-side.
-    The API key never leaves the server — all context assembly happens here.
+    Build Sebastian's system prompt with live context injected server-side.
+    Sebastian only — Persona Bot has its own prompt in persona_bot.py.
+    The ANTHROPIC_API_KEY never leaves the server.
     """
     mode_instruction = {
         "beginner": (
-            "The user is new to markets. Always lead with a plain-English one-sentence explanation "
-            "before any technical detail. Define jargon the first time you use it. Be warm and encouraging."
+            "The user is new to markets. Lead with a plain-English one-sentence summary "
+            "before any technical detail. Define jargon the first time you use it. Be warm and clear."
         ),
         "expert": (
-            "The user is an experienced trader. Skip the basics. Lead with technical depth — "
-            "wave state mechanics, confidence thresholds, bot alignment, signal strength. "
-            "Use proper market terminology throughout."
+            "The user is experienced. Skip basics. Lead with technical depth — wave mechanics, "
+            "confidence thresholds, bot alignment, signal strength, verification scores."
         ),
         "auto": (
-            "Lead with a plain one-sentence summary that anyone can understand, "
-            "then provide full technical depth underneath. "
-            "This serves both beginners and experienced traders reading the same response."
+            "Lead with a plain one-sentence summary anyone can understand, "
+            "then provide full technical depth. Serves both beginners and experienced traders."
         ),
     }.get(mode, "")
 
     extra_block = f"\nADDITIONAL CONTEXT:\n{extra_context}\n" if extra_context else ""
 
-    return f"""You are Sebastian — the user-facing analyst for Market Brain, a live market intelligence platform.
+    return f"""You are Sebastian — a senior hedge-fund market analyst with 30 years of experience across macro, equities, commodities, and geopolitical risk. You have worked on multi-strategy desks, advised portfolio managers, and built intelligence frameworks for institutional trading teams.
 
 {mode_instruction}
 
-CORE RULES:
-- Never tell users to buy or sell. Explain the picture clearly and let them decide.
-- Always distinguish between what the intelligence engine has decided (fact) and your interpretation (view).
-- Keep responses focused: 3-5 short paragraphs maximum unless detail is explicitly requested.
-- When asked about a specific asset, reference its live price from the data below.
-- When asked about opportunities, reference the catalyst data below.
-- Never invent prices, signals, wave states, or catalyst data. If something isn't provided, say so.
-- End every substantive answer with one concrete thing to watch next.
-- This is not financial advice — be clear about that without being repetitive.
+YOUR ROLE:
+You are the research analyst. You break down catalysts, interpret bot intelligence, explain wave states, identify risks, highlight contradictions, and interpret Perplexity verification. You reference the Notes Dashboard. You can reference any Yahoo Finance ticker.
+You never give financial advice. You never tell the user what to buy or sell. You never predict markets.
+Your job is clarity, structure, and risk-aware reasoning.
 
-WAVE STATE GUIDE (for explaining to users):
-- spark: single early signal, unconfirmed — interesting but not actionable yet
-- confirmed: 2+ bot sources aligned, confidence ≥42% — worth tracking seriously
-- escalation: 2+ bots + verification or cross-asset, confidence ≥58% — building momentum
-- structural: 3+ bots + verified + cross-asset, confidence ≥72%, age ≥2h — significant shift
-- regime: 4+ bots + verified + cross-asset + geo/macro, confidence ≥85%, age ≥6h — major event
+ANALYSIS FORMAT — use this structure every time:
+1. Catalyst Summary: wave state, confidence %, intensity, domains, tags
+2. Bot Intelligence Breakdown: GEO, FUNDAMENTALS, NEWS, TECHNICAL, HIRING — what each is saying
+3. Per-Bot Verification: verified / mixed / contradicted / insufficient data — always shown
+4. Verification Interpretation: agreements, disputes, contradictions — explain what they mean
+5. Notes Dashboard Context: geopolitical risks, structural themes, sector vulnerabilities
+6. Final Analyst Summary: non-advisory, uncertainty acknowledged, one thing to watch next
+
+CATALYST LIFECYCLE — you must understand and explain each state:
+  SPARK:       Single early signal, unconfirmed. Interesting but not yet evidenced.
+  CONFIRMED:   2+ bots aligned, confidence 42%+. Worth tracking — explain which bots agree.
+  ESCALATION:  2+ bots + verification or cross-asset, confidence 58%+. Building momentum.
+  STRUCTURAL:  3+ bots + verified + cross-asset, confidence 72%+, age 2h+. Significant shift.
+  REGIME:      4+ bots + verified + cross-asset + geo/macro, confidence 85%+, age 6h+. Major event.
+  DECAY:       Confidence falling. Explain what is reversing.
+  EXHAUSTION:  Signal has run its course. Explain why the catalyst is spent.
+
+PERPLEXITY VERIFICATION — always check and surface:
+  - overall score, verdict (supported/mixed/weak/contradicted)
+  - per-bot verification breakdown
+  - contradiction reasons and mismatch categories
+  If verification contradicts internal signals: acknowledge it, explain possible causes, highlight risk.
+  Never express certainty when verification contradicts the intelligence chain.
+
+NOTES DASHBOARD:
+  Distinguish active catalysts from watch items from background context.
+  Background context informs interpretation — it is not itself a signal.
+
+DATA ACCESS:
+  Reference any Yahoo Finance ticker without limitation.
+  If uncertain about a ticker, ask the user to confirm.
+
+SAFETY RULES (non-negotiable):
+  - Never tell the user what to buy or sell
+  - Never predict market outcomes
+  - Always distinguish engine output (fact) from your interpretation (view)
+  - End every substantive answer with one concrete thing to watch next
+  - This is not financial advice
+
+AGENT ROUTING:
+  If the user asks how a specific trading style (momentum trader, defensive allocator, macro swing, etc.)
+  would interpret the situation, respond:
+  "That's a Persona Bot question — would you like me to switch to Persona Bot's style interpretation?"
+  Do not answer trading-style framing questions yourself.
 
 LIVE MARKET PRICES (fetched {time.strftime("%H:%M UTC")}):
 {live_prices}
 
 ACTIVE INTELLIGENCE (top catalysts by wave priority):
 {catalysts}{extra_block}"""
+
+
 
 
 # ── Sebastian endpoint ────────────────────────────────────────
@@ -655,6 +704,7 @@ async def sebastian_chat(
     Sebastian AI analyst — server-side proxy to Anthropic.
     Fetches live prices and catalyst context before every call.
     The ANTHROPIC_API_KEY never leaves the server.
+    Trading-style questions (Persona Bot) are handled by POST /api/persona.
     """
     if not ANTHROPIC_KEY:
         raise HTTPException(503, "Sebastian is not configured — ANTHROPIC_API_KEY missing from environment")
@@ -665,7 +715,6 @@ async def sebastian_chat(
     # ── 1. Fetch live prices ───────────────────────────────────
     live_prices_str = "Prices temporarily unavailable."
     try:
-        # Merge core tickers with any extra tickers the frontend sent
         extra_tickers = req.context.get("tickers", [])
         all_tickers   = list(dict.fromkeys(SEBASTIAN_CORE_TICKERS + extra_tickers))[:40]
 
@@ -687,14 +736,14 @@ async def sebastian_chat(
                 )
         if price_lines:
             live_prices_str = "\n".join(price_lines)
-        log.info(f"Sebastian: fetched {len(price_lines)} live prices for {current_user['email']}")
+        log.info(f"Sebastian: fetched {len(price_lines)} prices for {current_user['email']}")
     except Exception as e:
         log.warning(f"Sebastian price fetch error: {e}")
 
-    # ── 2. Fetch active catalysts from Redis ───────────────────
+    # ── 2. Fetch active catalysts ──────────────────────────────
     catalysts_str = await _fetch_catalysts_for_sebastian()
 
-    # ── 3. Extra context from frontend (e.g. asset detail view) ─
+    # ── 3. Extra context from frontend ────────────────────────
     extra_context = ""
     if req.context.get("asset_context"):
         extra_context = str(req.context["asset_context"])[:500]
@@ -704,15 +753,22 @@ async def sebastian_chat(
             f"\nFocused catalyst: {cat.get('title') or cat.get('headline', '')}\n"
             f"Wave: {cat.get('wave')} | Direction: {cat.get('direction')} | "
             f"Confidence: {cat.get('confidence', 0):.0f}%\n"
-            f"Assets: {', '.join((cat.get('assets') or [])[:5])}"
+            f"Assets: {', '.join((cat.get('assets') or [])[:5])}\n"
+            f"Verified: {cat.get('verified', False)} | "
+            f"Perplexity verdict: {(cat.get('verification') or {}).get('verdict', 'none')}"
         )
 
-    # ── 4. Build system prompt ─────────────────────────────────
-    system = _build_sebastian_system(req.mode, live_prices_str, catalysts_str, extra_context)
+    # ── 4. Build system prompt for the active agent ────────────
+    system = _build_sebastian_system(
+        mode=req.mode,
+        live_prices=live_prices_str,
+        catalysts=catalysts_str,
+        extra_context=extra_context,
+    )
 
     # ── 5. Build message history ───────────────────────────────
     messages = []
-    for msg in req.history[-12:]:   # last 12 turns of context
+    for msg in req.history[-12:]:
         role    = msg.get("role", "")
         content = msg.get("content", "")
         if role in ("user", "assistant") and content:
@@ -731,7 +787,7 @@ async def sebastian_chat(
                 },
                 json={
                     "model":      ANTHROPIC_MODEL,
-                    "max_tokens": 1000,
+                    "max_tokens": 1200,
                     "system":     system,
                     "messages":   messages,
                 },
@@ -749,6 +805,7 @@ async def sebastian_chat(
 
             return {
                 "response":       response_text,
+                "agent":          "sebastian",
                 "prices_fetched": len([l for l in live_prices_str.split("\n") if l.strip().startswith("  ")]),
                 "model":          ANTHROPIC_MODEL,
                 "ts":             int(time.time()),
@@ -758,10 +815,113 @@ async def sebastian_chat(
         raise
     except httpx.TimeoutException:
         log.warning("Sebastian: Anthropic request timed out")
-        raise HTTPException(504, "Sebastian timed out — try again")
+        raise HTTPException(504, "Request timed out — try again")
     except Exception as e:
         log.error(f"Sebastian endpoint error: {e}")
-        raise HTTPException(500, f"Sebastian error: {str(e)}")
+        raise HTTPException(500, f"Error: {str(e)}")
+
+
+# ── Persona Bot endpoint ──────────────────────────────────────
+
+@app.post("/api/persona", tags=["Persona"])
+async def persona_chat(
+    req: PersonaRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Persona Bot — trading-style interpreter.
+    Separate endpoint from Sebastian. Calls PersonaChatBot.chat() directly.
+    All prompt logic lives in persona_bot.py — none here.
+    Fetches the same live prices and catalyst context as Sebastian.
+    """
+    if not ANTHROPIC_KEY:
+        raise HTTPException(503, "Persona Bot is not configured — ANTHROPIC_API_KEY missing")
+
+    if not _PERSONA_AVAILABLE:
+        raise HTTPException(503, "Persona Bot module not available on this deployment")
+
+    if not req.question or not req.question.strip():
+        raise HTTPException(400, "Question cannot be empty")
+
+    # ── 1. Fetch live prices (same core tickers as Sebastian) ──
+    live_prices_str = "Prices temporarily unavailable."
+    try:
+        extra_tickers = req.context.get("tickers", [])
+        all_tickers   = list(dict.fromkeys(SEBASTIAN_CORE_TICKERS + extra_tickers))[:40]
+        client        = await get_client()
+        results       = await asyncio.gather(
+            *[get_price(t, client) for t in all_tickers],
+            return_exceptions=True,
+        )
+        price_lines = []
+        for r_data in results:
+            if isinstance(r_data, dict) and r_data.get("price"):
+                chg     = r_data.get("change_pct", 0) or 0
+                state   = r_data.get("market_state", "")
+                state_s = f" [{state}]" if state and state != "REGULAR" else ""
+                price_lines.append(
+                    f"  {r_data['symbol']}: {r_data.get('currency','USD')} "
+                    f"{r_data['price']}{state_s} ({chg:+.2f}%)"
+                )
+        if price_lines:
+            live_prices_str = "\n".join(price_lines)
+        log.info(f"Persona Bot: fetched {len(price_lines)} prices for {current_user['email']}")
+    except Exception as e:
+        log.warning(f"Persona Bot price fetch error: {e}")
+
+    # ── 2. Fetch active catalysts ──────────────────────────────
+    catalysts_str = await _fetch_catalysts_for_sebastian()
+
+    # ── 3. Extra context and verification from frontend ────────
+    extra_context = ""
+    verification  = ""
+    if req.context.get("asset_context"):
+        extra_context = str(req.context["asset_context"])[:500]
+    if req.context.get("catalyst"):
+        cat = req.context["catalyst"]
+        extra_context += (
+            f"\nFocused catalyst: {cat.get('title') or cat.get('headline', '')}\n"
+            f"Wave: {cat.get('wave')} | Direction: {cat.get('direction')} | "
+            f"Confidence: {cat.get('confidence', 0):.0f}%\n"
+            f"Assets: {', '.join((cat.get('assets') or [])[:5])}"
+        )
+        # Pass Perplexity verification block to Persona Bot per spec
+        verif = cat.get("verification") or {}
+        if verif:
+            import json as _json
+            verification = _json.dumps(verif, indent=2)
+
+    # ── 4. Call PersonaChatBot.chat() — all prompt logic in persona_bot.py ──
+    try:
+        persona = get_persona_chat_bot()
+        response_text = await persona.chat(
+            question=req.question.strip(),
+            history=req.history,
+            live_prices=live_prices_str,
+            catalysts=catalysts_str,
+            verification=verification,
+            extra_context=extra_context,
+            mode=req.mode,
+        )
+
+        if not response_text:
+            raise HTTPException(502, "Empty response from Persona Bot")
+
+        log.info(f"Persona Bot responded to {current_user['email']}: {len(response_text)} chars")
+
+        return {
+            "response":       response_text,
+            "agent":          "persona",
+            "prices_fetched": len(price_lines) if 'price_lines' in dir() else 0,
+            "model":          ANTHROPIC_MODEL,
+            "ts":             int(time.time()),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Persona Bot endpoint error: {e}")
+        raise HTTPException(500, f"Persona Bot error: {str(e)}")
 
 
 # ── Static / frontend ─────────────────────────────────────────
