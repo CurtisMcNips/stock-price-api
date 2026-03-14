@@ -1,28 +1,27 @@
 """
-Market Brain — Persona Bot + Sebastian
-───────────────────────────────────────
-Two distinct layers in one module:
+Market Brain — Persona Bot
+───────────────────────────
+Two classes. Two completely separate roles. One module.
 
-  PersonaBot — backend communication layer.
-    Translates structured catalyst data into human-readable intelligence.
-    Called async after every catalyst creation / wave transition / confidence update.
-    Does NOT interpret signals, assign confidence, or classify waves.
-    Outputs are stored on the catalyst as persona_summary fields.
+PersonaBot  (see class ~line 210)
+    Backend communication layer. Unchanged from original live file.
+    Translates structured catalyst packets into human-readable JSON summaries.
+    Called by the Chief of Staff after every catalyst event.
+    Outputs stored on the catalyst as persona_summary fields.
+    Responds in JSON only. Never user-facing. Never conversational.
 
-  Sebastian — user-facing analyst.
-    Invoked on demand via /api/sebastian.
-    Fetches live prices from OpportunityEngine before every response.
-    Pulls top opportunities from active catalysts.
-    Supports two modes: beginner (plain English first) and expert (full depth).
-    Generates contextual prompts per wave state and bias.
-    Never influences the intelligence chain.
-
-Per spec:
-  - Sebastian fetches 40+ live prices at invocation time
-  - Sebastian reads persona_summary fields stored by PersonaBot
-  - Sebastian pulls top opportunities from active escalating catalysts
-  - Beginner-friendly explanation always comes first
-  - Technical depth available on request or for advanced users
+PersonaChatBot  (see class ~line 370)
+    User-facing trading-style interpreter. New.
+    Explains how a specific trading style would read the current situation.
+    Has its own full system prompt per the design specification.
+    Prompt assembly order per spec:
+        context + PERSONA_CHAT_PROMPT + perplexity_verification + user_query
+    Reads: bot outputs (GEO, FUNDAMENTALS, NEWS, TECHNICAL, HIRING, INSIDER,
+           ANALYST, EARNINGS, MACRO), catalyst lifecycle, Perplexity verification,
+           Notes Dashboard context, live market data.
+    Called exclusively from POST /api/persona in app.py.
+    Never called from the intelligence chain.
+    Never gives financial advice. Never tells users what to buy or sell.
 """
 
 import json
@@ -35,15 +34,16 @@ import httpx
 
 log = logging.getLogger("mb.persona")
 
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 
-# ─────────────────────────────────────────────────────────────────
-#  PERSONA BOT  — backend only, never user-facing
-# ─────────────────────────────────────────────────────────────────
 
-PERSONA_SYSTEM = """You are the Persona Bot — the communication layer of the Market Intelligence Engine.
+# =============================================================================
+#  PERSONA_PROMPT — backend communication layer prompt (unchanged from live)
+# =============================================================================
+
+PERSONA_PROMPT = """You are the Persona Bot — the communication layer of the Market Intelligence Engine.
 
 Your job is to translate structured catalyst data into clear, human-readable explanations.
 You do not generate signals, interpret raw data, assign confidence, or classify waves.
@@ -51,9 +51,12 @@ You only communicate what the intelligence engine has already decided.
 
 Your tone:
 - structured, clear, rational
-- grounded in real-world cause-and-effect
+- grounded in real-world context
 - avoids hype, avoids vagueness
+- explains cause-and-effect cleanly
 - anticipates what matters next
+- connects catalysts to missions and positions
+- focuses on clarity, not drama
 - educational but not patronising
 - strategic but not speculative
 
@@ -65,17 +68,170 @@ You always produce:
 5. What to watch next
 
 You never:
-- invent catalysts or new data
+- invent catalysts
 - reinterpret signals
-- change confidence or wave state
+- change confidence or wave
 - contradict the Chief of Staff
+- contradict Sebastian
+- add new data
 - speculate beyond the provided packet
 
-Respond ONLY in valid JSON. No markdown fences, no preamble."""
+Your outputs must be short, structured, and immediately useful.
 
+Always respond in valid JSON only. No markdown fences, no preamble."""
+
+
+# =============================================================================
+#  PERSONA_CHAT_PROMPT — trading-style interpreter prompt (new, user-facing)
+#
+#  Per spec, this prompt is assembled into the final system as:
+#      context + PERSONA_CHAT_PROMPT + perplexity_verification + user_query
+# =============================================================================
+
+PERSONA_CHAT_PROMPT = """You are Persona Bot — the trading-style interpreter for Market Brain, a live institutional-grade market intelligence platform.
+
+YOUR IDENTITY:
+You are a trading-style interpreter with deep knowledge of how different market participants think,
+frame risk, and read signals. You have familiarity across hedge fund desks — macro, equity long/short,
+commodities, quant, and event-driven.
+
+You are NOT an analyst. You do NOT give financial advice.
+You do NOT tell the user what to buy or sell. You do NOT predict markets.
+You explain how a specific trading style would interpret the current situation.
+You provide perspective, not instruction. You never express certainty.
+
+YOUR ROLE:
+You answer questions like:
+- "How would a momentum trader interpret this?"
+- "How would a defensive allocator view this setup?"
+- "How would a macro swing trader think about this catalyst?"
+- "How would a contrarian look at this Perplexity contradiction?"
+
+You read and interpret everything in context:
+  - Bot intelligence: GEO, FUNDAMENTALS, NEWS, TECHNICAL, HIRING, INSIDER, ANALYST, EARNINGS, MACRO
+  - Catalyst lifecycle: wave state, confidence %, intensity, domains, tags
+  - Perplexity verification: overall score, verdict, per-bot verification, contradictions, audit notes
+  - Notes Dashboard: geopolitical background risks, structural themes, sector vulnerabilities, tail-risk
+  - Live market data: prices, sector flows, cross-asset alignment
+
+TRADING STYLES YOU INTERPRET:
+
+Momentum trader
+  Focuses on: rate of change, signal acceleration, price confirmation, volume, breakout thesis.
+  Wave framing: spark = ignore; confirmed = watching; escalation = interested; structural = engaged; regime = full conviction.
+  Perplexity weighting: ignores weak verification if price action confirms. Exits on hard contradiction.
+
+Defensive allocator
+  Focuses on: capital preservation, downside risk, volatility, correlation, maximum drawdown.
+  Wave framing: spark/confirmed = note only; escalation = risk-off review; structural = defensive repositioning.
+  Perplexity weighting: any contradiction = red flag. Waits for full resolution before forming any view.
+
+Macro swing trader
+  Focuses on: regime context, catalyst duration, sector rotation, multi-week holding frame.
+  Wave framing: confirmed = forming thesis; escalation = acting; structural = high-conviction hold.
+  Perplexity weighting: uses verification to calibrate position sizing, not timing. Contradiction = smaller position.
+
+Event-driven trader
+  Focuses on: catalyst clarity, timing precision, binary risk/reward, pre/post announcement setups.
+  Wave framing: spark = too early; confirmed = monitoring; escalation = positioning; structural = fully engaged.
+  Perplexity weighting: binary filter — supported = engage; contradicted = pass entirely.
+
+Value-oriented investor
+  Focuses on: fundamentals vs signal, whether macro dislocation creates valuation entry context.
+  Wave framing: most interested at regime-level dislocations that move prices away from fundamental value.
+  Perplexity weighting: high bar — wants both fundamental and external verification before any view.
+
+Technical trader
+  Focuses on: price levels, RSI, MACD, volume, trend confirmation, support/resistance breakout.
+  Wave framing: structural signals aligning with technical breakouts = highest conviction setups.
+  Perplexity weighting: secondary. Price action is primary; verification confirms or denies.
+
+Geopolitical risk trader
+  Focuses on: tail risk framing, supply chain disruption, sanctions premium, conflict risk, safe havens.
+  Wave framing: GEO bot weight is most important; regime = full risk premium engagement.
+  Perplexity weighting: high weight — geopolitical claims require external corroboration.
+
+Commodities specialist
+  Focuses on: supply/demand imbalance, shipping route disruption, futures curve, energy/metals/agriculture interplay.
+  Wave framing: structural and regime waves in commodity-adjacent sectors = core conviction territory.
+  Perplexity weighting: looks for corroboration across TECHNICAL + GEO + NEWS bots specifically.
+
+Quant / mean-reversion trader
+  Focuses on: statistical edge, signal decay rate, overshoot thesis, normalisation timing, factor exposure.
+  Wave framing: escalation and structural = overshoot risk to fade; regime = possible new equilibrium.
+  Perplexity weighting: wants high verification score. Contradiction = signal contamination risk.
+
+Risk-on / risk-off allocator
+  Focuses on: VIX context, cross-asset correlation, safe haven flows, beta of current positioning.
+  Wave framing: regime = forced repositioning; structural = cautious risk-on or risk-off directional shift.
+  Perplexity weighting: looks for macro-level verification (FRED, ETF momentum, cross-asset).
+
+Contrarian
+  Focuses on: crowded positioning, exhaustion signals, Perplexity contradictions, fading consensus.
+  Wave framing: most interested at escalation (crowded thesis) and decay (reversal opportunity).
+  Perplexity weighting: specifically seeks contradictions as evidence of overcrowded consensus.
+
+CATALYST LIFECYCLE — how each wave maps to trading-style interpretation:
+  SPARK:       Single early signal, unconfirmed. Most styles ignore. Contrarian watches.
+  CONFIRMED:   2+ bots aligned, confidence 42%+. Momentum starts watching. Defensive notes it.
+  ESCALATION:  2+ bots + verification or cross-asset, confidence 58%+. Most styles forming a view.
+  STRUCTURAL:  3+ bots + verified + cross-asset, confidence 72%+, age 2h+. Macro and event-driven engage.
+  REGIME:      4+ bots + verified + cross-asset + geo/macro, confidence 85%+, age 6h+. Full evidence threshold.
+  DECAY:       Confidence falling, signal weakening. Momentum exits. Contrarian starts watching reversal.
+  EXHAUSTION:  Signal spent. Value and quant assess whether dislocation created opportunity.
+
+PERPLEXITY VERIFICATION — always surface how the chosen style weights the current verdict:
+  The verification block includes: overall score (-1.0 to +1.0), verdict (supported/mixed/weak/contradicted),
+  justification, key risks, extra sources, audit notes, and per-bot verification status.
+  Always explain how the chosen trading style specifically weighs the current verification result.
+
+NOTES DASHBOARD CONTEXT:
+Reference geopolitical background risks, structural themes, sector vulnerabilities, and tail-risk scenarios
+when they are relevant to the question. Always distinguish:
+  - Active catalyst: a live signal in the intelligence chain
+  - Watch item: being monitored, not yet a signal
+  - Background context: informs interpretation but is not itself a signal
+
+DATA ACCESS:
+You can reference any Yahoo Finance ticker the user asks about. You are not limited to a predefined list.
+If uncertain about a ticker symbol, ask the user to confirm it.
+Use sector, industry, macro context, catalyst context, fundamentals, sentiment, and volatility
+to contextualise any asset within the chosen trading style.
+
+OUTPUT FORMAT — always use this structure for every response:
+  1. Style framing:       "A [trading style] would interpret this as..."
+  2. Signal reading:      How this style reads the current wave state, confidence, and bot alignment
+  3. Key focus areas:     The 2-3 things this style specifically prioritises in this exact setup
+  4. Verification weight: How this style treats the current Perplexity verdict and any contradictions
+  5. What they watch:     The specific trigger or signal this style needs to see next
+  6. Risk framing:        How this style thinks about the downside in this setup
+
+Be specific. Reference the actual wave state, confidence level, verification verdict, and active
+bot signals from the context provided. Do not give generic style descriptions in isolation.
+
+SAFETY RULES (non-negotiable):
+  - Never tell the user what to buy or sell
+  - Never give investment advice or personalised recommendations
+  - Never predict price movements or market outcomes
+  - Always frame as "a [style] trader would..." — never as "you should..."
+  - Always close every response with: "This is interpretation of a trading style — not financial advice."
+
+AGENT ROUTING:
+If the user asks for analyst-style catalyst breakdown, wave state explanation, or bot signal
+interpretation rather than trading-style framing, respond:
+"That sounds like a question for Sebastian\'s analysis — would you like to switch to Sebastian?"
+Do not attempt to answer analyst questions yourself."""
+
+
+# =============================================================================
+#  Internal HTTP helpers
+# =============================================================================
 
 async def _call_claude_json(system: str, prompt: str, max_tokens: int = 600) -> Optional[dict]:
-    """Call Claude and parse JSON response. Returns parsed dict or None."""
+    """
+    Call Claude and return parsed JSON dict.
+    Used by PersonaBot (backend communication layer).
+    """
     if not ANTHROPIC_KEY:
         return None
     try:
@@ -95,25 +251,29 @@ async def _call_claude_json(system: str, prompt: str, max_tokens: int = 600) -> 
                 },
             )
             if r.status_code != 200:
-                log.warning(f"Claude API error {r.status_code}: {r.text[:200]}")
+                log.warning(f"PersonaBot JSON error {r.status_code}")
                 return None
             content = r.json().get("content", [{}])[0].get("text", "{}")
-            content = content.strip()
-            for fence in ("```json", "```"):
-                content = content.lstrip(fence)
-            content = content.rstrip("```").strip()
+            content = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             return json.loads(content)
     except Exception as e:
-        log.warning(f"Claude call error: {e}")
+        log.warning(f"PersonaBot JSON call failed: {e}")
         return None
 
 
-async def _call_claude_text(system: str, prompt: str, max_tokens: int = 1000) -> Optional[str]:
-    """Call Claude and return raw text response."""
+async def _call_claude_text(
+    system:     str,
+    messages:   list,
+    max_tokens: int = 1100,
+) -> Optional[str]:
+    """
+    Call Claude with conversation history and return raw text.
+    Used by PersonaChatBot (user-facing chat).
+    """
     if not ANTHROPIC_KEY:
         return None
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=35) as client:
             r = await client.post(
                 ANTHROPIC_URL,
                 headers={
@@ -125,272 +285,122 @@ async def _call_claude_text(system: str, prompt: str, max_tokens: int = 1000) ->
                     "model":      ANTHROPIC_MODEL,
                     "max_tokens": max_tokens,
                     "system":     system,
-                    "messages":   [{"role": "user", "content": prompt}],
+                    "messages":   messages,
                 },
             )
             if r.status_code != 200:
-                log.warning(f"Claude text error {r.status_code}")
+                log.warning(f"PersonaChatBot error {r.status_code}: {r.text[:200]}")
                 return None
             return r.json().get("content", [{}])[0].get("text", "").strip()
     except Exception as e:
-        log.warning(f"Claude text call error: {e}")
+        log.warning(f"PersonaChatBot call failed: {e}")
         return None
 
 
-# ── Fallbacks ─────────────────────────────────────────────────────
+# =============================================================================
+#  Fallbacks for PersonaBot (backend layer)
+# =============================================================================
 
 def _fallback_catalyst_summary(packet: dict) -> dict:
-    title     = packet.get("headline", "Unknown catalyst")
-    direction = packet.get("direction", "neutral")
-    wave      = packet.get("wave", "spark")
-    confidence= packet.get("confidence", 0.0)
-    drivers   = packet.get("drivers", [])
+    """Fallback summary when Claude is unavailable."""
+    ticker     = packet.get("headline", "Unknown catalyst")
+    direction  = packet.get("direction", "neutral")
+    wave       = packet.get("wave", "spark")
+    confidence = packet.get("confidence", 0.0)
+    drivers    = packet.get("drivers", [])
     return {
-        "title":          title,
-        "summary":        f"{title} — {direction} signal at {wave} wave ({confidence:.0%} confidence). "
+        "title":          ticker,
+        "summary":        f"{ticker} — {direction} signal at {wave} wave ({confidence:.0%} confidence). "
                           f"{drivers[0] if drivers else 'No drivers specified.'}",
-        "why_it_matters": f"Wave: {wave}. Direction: {direction}. Confidence: {confidence:.0%}.",
-        "what_to_watch":  ["Monitor for wave escalation", "Watch for additional bot alignment", "Check cross-asset sector flow"],
+        "why_it_matters": f"Wave classification: {wave}. Direction: {direction}. Confidence: {confidence:.0%}.",
+        "what_to_watch":  [
+            "Monitor for wave escalation",
+            "Watch for additional bot alignment",
+            "Check cross-asset sector flow",
+        ],
     }
+
 
 def _fallback_wave_transition(packet: dict) -> dict:
     return {
-        "title":        f"Wave transition: {packet.get('from_wave')} → {packet.get('to_wave')}",
-        "explanation":  f"Catalyst moved from {packet.get('from_wave')} to {packet.get('to_wave')}. Reason: {packet.get('reason', 'Multi-bot alignment.')}",
-        "implications": ["Higher confidence threshold now applies", "Signal persists longer before decay"],
-        "watch_next":   ["Perplexity verification", "Cross-asset alignment confirmation"],
+        "title":        f"Wave transition: {packet.get('from_wave')} -> {packet.get('to_wave')}",
+        "explanation":  (
+            f"Catalyst moved from {packet.get('from_wave')} to {packet.get('to_wave')} wave. "
+            f"Reason: {packet.get('reason', 'Multi-bot alignment.')}"
+        ),
+        "implications": [
+            "Higher confidence threshold now applies",
+            "Signal persists longer before decay",
+        ],
+        "watch_next": ["Perplexity verification", "Cross-asset alignment confirmation"],
     }
 
+
 def _fallback_confidence_update(packet: dict) -> dict:
-    old = packet.get("old_confidence", 0.0)
-    new = packet.get("new_confidence", 0.0)
+    old   = packet.get("old_confidence", 0.0)
+    new   = packet.get("new_confidence", 0.0)
     delta = new - old
-    direction_str = "increased" if delta > 0 else "decreased"
+    d_str = "increased" if delta > 0 else "decreased"
     return {
-        "title":       f"Confidence {direction_str}: {old:.0%} → {new:.0%}",
-        "explanation": f"Confidence {direction_str} by {abs(delta):.0%}. Reason: {packet.get('reason', 'Signal update.')}",
+        "title":       f"Confidence {d_str}: {old:.0%} -> {new:.0%}",
+        "explanation": f"Confidence {d_str} by {abs(delta):.0%}. Reason: {packet.get('reason', 'Signal update.')}",
         "drivers":     [packet.get("reason", "Signal update")],
         "watch_next":  ["Watch for further verification", "Monitor wave transition conditions"],
     }
+
 
 def _fallback_daily_brief(packet: dict) -> dict:
     top = packet.get("top_catalysts", [])
     return {
         "headline": f"Daily Brief — {packet.get('date', 'Today')}",
         "sections": [
-            {"title": "Top Catalysts",  "content": f"{len(top)} active catalysts tracked."},
+            {"title": "Top Catalysts", "content": f"{len(top)} active catalysts tracked."},
             {"title": "Market Themes",  "content": ", ".join(packet.get("market_themes", ["No themes identified"]))},
         ],
     }
 
 
-# ─────────────────────────────────────────────────────────────────
-#  SEBASTIAN  — user-facing analyst
-# ─────────────────────────────────────────────────────────────────
-
-# Wave state → human framing
-WAVE_FRAMING = {
-    "spark": {
-        "label":   "Early Signal",
-        "plain":   "Something has just started moving — it's early and unconfirmed, but worth knowing about.",
-        "meaning": "A single source has flagged activity. Not enough to act on, but the system is watching.",
-    },
-    "confirmed": {
-        "label":   "Confirmed Signal",
-        "plain":   "Multiple sources are now agreeing. This signal has enough backing to take seriously.",
-        "meaning": "Two or more intelligence sources have aligned. Confidence is building.",
-    },
-    "escalation": {
-        "label":   "Escalating Signal",
-        "plain":   "The picture is getting clearer and stronger. Multiple sources agree and momentum is building.",
-        "meaning": "High alignment across bots. This is the stage where opportunities often become actionable.",
-    },
-    "structural": {
-        "label":   "Structural Shift",
-        "plain":   "This has moved beyond a short-term signal — there's a structural change happening here.",
-        "meaning": "3+ bots aligned, verified externally, cross-asset confirmation. The kind of move that lasts weeks or months.",
-    },
-    "regime": {
-        "label":   "Regime Change",
-        "plain":   "This is a major market event. The kind of catalyst that reshapes entire sectors.",
-        "meaning": "Maximum evidence threshold reached. 4+ bots, verified, cross-asset, geo/macro type.",
-    },
-}
-
-# Per-wave entry prompts (one for each wave × bias combination)
-SEBASTIAN_ENTRY_PROMPTS = {
-    ("bullish", "spark"):        "Something's starting here. Too early to act on, but worth keeping on your radar.",
-    ("bullish", "confirmed"):    "This one is building real momentum. Multiple sources are agreeing — want me to walk through what's driving it?",
-    ("bullish", "escalation"):   "The setup here is becoming genuinely interesting. Strong alignment, momentum is building. Let me show you what the bots are seeing.",
-    ("bullish", "structural"):   "This has moved beyond a trade idea. There's a structural shift happening — the kind that can last weeks or months. Worth understanding properly.",
-    ("bullish", "regime"):       "This is a regime-level catalyst. Major event, maximum evidence. I'd want you to understand exactly what's happening before considering any position.",
-    ("bearish", "spark"):        "Early warning signs here. Nothing confirmed yet, but worth monitoring.",
-    ("bearish", "confirmed"):    "Confirmed negative signals across multiple sources. Worth understanding why before the market fully prices this in.",
-    ("bearish", "escalation"):   "Pressure is building on the downside. The bear case is getting crowded for a reason. Want me to break it down?",
-    ("bearish", "structural"):   "Structural weakness confirmed. This isn't a dip — this is a trend change. Let me show you what the bots are seeing.",
-    ("bearish", "regime"):       "Regime-level deterioration. Multiple systemic signals aligned. Protective positioning worth understanding.",
-    ("neutral", "spark"):        "Something stirred but no clear direction yet. Monitoring.",
-    ("neutral", "confirmed"):    "Mixed signals — some sources bullish, some cautious. Classic uncertainty setup.",
-    ("neutral", "escalation"):   "High activity, no strong bias. The market is figuring this out in real time.",
-    ("neutral", "structural"):   "Complex picture. Multiple valid narratives competing. Let's look at the evidence together.",
-    ("neutral", "regime"):       "High-intensity regime with no clear direction. Volatility is the signal here.",
-}
-
-
-def _build_sebastian_system(
-    live_prices_block:  str,
-    catalysts_block:    str,
-    opportunities_block: str,
-    user_mode:          str = "auto",
-) -> str:
-    """
-    Build Sebastian's full system prompt, injecting live context at call time.
-
-    user_mode:
-      "beginner" — always lead with plain English, avoid jargon
-      "expert"   — full technical depth, less hand-holding
-      "auto"     — judge from the question and provide both layers
-    """
-
-    mode_instruction = {
-        "beginner": (
-            "The user is new to markets. Always lead with a plain-English explanation "
-            "(one sentence a 16-year-old could understand) before any technical detail. "
-            "Define any jargon the first time you use it. Be warm and clear."
-        ),
-        "expert": (
-            "The user is an experienced trader. Skip the basics. Go straight to "
-            "technical depth — wave state, confidence mechanics, bot alignment, "
-            "risk/reward. Use proper terminology."
-        ),
-        "auto": (
-            "Assess the question and lead with a plain one-sentence summary, "
-            "then provide the full technical picture. "
-            "This serves both beginners and experienced traders reading the same answer."
-        ),
-    }.get(user_mode, "")
-
-    return f"""You are Sebastian — the user-facing analyst for Market Brain.
-
-You help traders at ALL levels understand market intelligence clearly.
-
-{mode_instruction}
-
-CORE RULES:
-- Never tell users to buy or sell. Explain the picture, let them decide.
-- Always distinguish between what the intelligence engine has decided (factual) and what you're interpreting (your view).
-- Keep responses structured: summary first, then depth.
-- Be concise. Most answers should be 3-5 short paragraphs maximum.
-- If asked about a specific asset, always reference its current price and change from the live data below.
-- If asked about opportunities, reference the ranked list below.
-- Never invent prices, signals, or catalyst data. If you don't have it, say so.
-- This is not financial advice — always be clear about that without being annoying about it.
-
-WAVE STATE GUIDE (for explaining to users):
-- spark: single early signal, unconfirmed
-- confirmed: 2+ bot sources aligned, confidence ≥42%
-- escalation: 2+ bots + verification or cross-asset, confidence ≥58%
-- structural: 3+ bots + verified + cross-asset, confidence ≥72%, age ≥2h
-- regime: 4+ bots + verified + cross-asset + geo/macro, confidence ≥85%, age ≥6h
-
-LIVE PRICES (fetched at {time.strftime('%H:%M UTC')}):
-{live_prices_block}
-
-ACTIVE INTELLIGENCE (top catalysts by wave/confidence):
-{catalysts_block}
-
-TOP OPPORTUNITIES (ranked by wave + confidence + momentum):
-{opportunities_block}"""
-
-
-def _format_catalysts_for_sebastian(catalysts: list) -> str:
-    """Format active catalysts into a clean block for Sebastian's context."""
-    if not catalysts:
-        return "  No active catalysts."
-
-    lines = []
-    for cat in catalysts[:8]:  # top 8 by wave priority
-        wave       = cat.get("wave", "spark")
-        direction  = cat.get("direction", "neutral")
-        confidence = cat.get("confidence", 0.0)
-        title      = cat.get("title", cat.get("headline", ""))[:80]
-        assets     = ", ".join(cat.get("assets", [])[:3])
-        verified   = "✓ verified" if cat.get("verified") else ""
-        persona    = cat.get("persona_summary", {})
-        summary    = persona.get("summary", cat.get("summary", ""))[:100] if persona else cat.get("summary", "")[:100]
-
-        lines.append(
-            f"  [{wave.upper()} | {direction} | {confidence:.0f}% conf {verified}]\n"
-            f"  {title}\n"
-            f"  Assets: {assets or 'sector-wide'}\n"
-            f"  {summary}"
-        )
-    return "\n\n".join(lines)
-
-
-def _format_opportunities_for_sebastian(opportunities: list) -> str:
-    """Format opportunity list into a clean block for Sebastian's context."""
-    if not opportunities:
-        return "  No ranked opportunities available."
-
-    lines = []
-    for opp in opportunities[:10]:
-        ticker    = opp.get("ticker", "")
-        name      = opp.get("name", "")
-        price     = opp.get("price", 0)
-        currency  = opp.get("currency", "USD")
-        change    = opp.get("change_pct", 0.0)
-        wave      = opp.get("catalyst_wave", "")
-        direction = opp.get("direction", "")
-        sub       = opp.get("sub_sector", "")
-        change_str = f"{change:+.2f}%" if change is not None else "N/A"
-        lines.append(
-            f"  {ticker} ({name}) — {currency} {price} ({change_str} today) | "
-            f"{sub} | {direction} | wave: {wave}"
-        )
-    return "\n".join(lines)
-
-
-def get_entry_prompt(bias: str, wave: str) -> str:
-    """Return the contextual entry prompt for a given wave + bias combination."""
-    return SEBASTIAN_ENTRY_PROMPTS.get(
-        (bias, wave),
-        SEBASTIAN_ENTRY_PROMPTS.get(("neutral", wave), "Monitoring this situation.")
-    )
-
-
-def get_wave_framing(wave: str) -> dict:
-    """Return the plain-English framing for a wave state."""
-    return WAVE_FRAMING.get(wave, WAVE_FRAMING["spark"])
-
-
-# ─────────────────────────────────────────────────────────────────
-#  PersonaBot class
-# ─────────────────────────────────────────────────────────────────
+# =============================================================================
+#  PersonaBot — backend communication layer (contract unchanged from live)
+# =============================================================================
 
 class PersonaBot:
     """
-    Backend communication layer for Market Brain.
+    Communication layer for Market Brain.
     Translates structured intelligence packets into human-readable summaries.
-    Outputs stored on catalysts as persona_summary fields.
+    Called by the Chief of Staff — never user-facing directly.
+    Public method contract is unchanged from the original live file.
     """
 
+    def __init__(self):
+        self.persona_prompt = PERSONA_PROMPT
+
     async def rewrite_catalyst(self, catalyst_packet: dict) -> dict:
+        """
+        Rewrite a catalyst packet into a structured human summary.
+        Input:  CatalystPacket (id, headline, wave, confidence, direction, drivers, etc.)
+        Output: {title, summary, why_it_matters, what_to_watch}
+        """
         prompt = (
             f"Rewrite this catalyst into a clear intelligence summary.\n\n"
             f"Catalyst: {json.dumps(catalyst_packet, indent=2)}\n\n"
             f"Respond ONLY in JSON:\n"
-            f'{{"title": "concise headline (max 10 words)", '
+            f'{{"title": "concise headline", '
             f'"summary": "2-3 sentences explaining what happened and why", '
-            f'"why_it_matters": "2-3 sentences on market implications", '
+            f'"why_it_matters": "2-3 sentences on market/mission implications", '
             f'"what_to_watch": ["trigger 1", "trigger 2", "trigger 3"]}}'
         )
-        result = await _call_claude_json(PERSONA_SYSTEM, prompt, max_tokens=500)
+        result = await _call_claude_json(PERSONA_PROMPT, prompt, max_tokens=500)
         return result or _fallback_catalyst_summary(catalyst_packet)
 
     async def mission_update(self, mission_packet: dict) -> dict:
+        """
+        Generate a mission progress update.
+        Input:  {mission, wave, confidence_change, catalyst_id, reason}
+        Output: {mission, update, impact, next_steps}
+        """
         prompt = (
-            f"Generate a mission progress update.\n\n"
+            f"Generate a mission update for this catalyst development.\n\n"
             f"Mission packet: {json.dumps(mission_packet, indent=2)}\n\n"
             f"Respond ONLY in JSON:\n"
             f'{{"mission": "mission name", '
@@ -398,7 +408,7 @@ class PersonaBot:
             f'"impact": "2 sentences on market and position impact", '
             f'"next_steps": ["step 1", "step 2", "step 3"]}}'
         )
-        result = await _call_claude_json(PERSONA_SYSTEM, prompt, max_tokens=400)
+        result = await _call_claude_json(PERSONA_PROMPT, prompt, max_tokens=400)
         if result:
             return result
         return {
@@ -409,6 +419,11 @@ class PersonaBot:
         }
 
     async def wave_transition(self, transition_packet: dict) -> dict:
+        """
+        Explain a wave transition clearly.
+        Input:  {catalyst_id, from_wave, to_wave, reason}
+        Output: {title, explanation, implications, watch_next}
+        """
         prompt = (
             f"Explain this wave transition clearly.\n\n"
             f"Transition: {json.dumps(transition_packet, indent=2)}\n\n"
@@ -418,10 +433,15 @@ class PersonaBot:
             f'"implications": ["implication 1", "implication 2", "implication 3"], '
             f'"watch_next": ["watch 1", "watch 2"]}}'
         )
-        result = await _call_claude_json(PERSONA_SYSTEM, prompt, max_tokens=400)
+        result = await _call_claude_json(PERSONA_PROMPT, prompt, max_tokens=400)
         return result or _fallback_wave_transition(transition_packet)
 
     async def confidence_update(self, confidence_packet: dict) -> dict:
+        """
+        Explain a confidence change.
+        Input:  {catalyst_id, old_confidence, new_confidence, reason}
+        Output: {title, explanation, drivers, watch_next}
+        """
         prompt = (
             f"Explain this confidence change clearly.\n\n"
             f"Update: {json.dumps(confidence_packet, indent=2)}\n\n"
@@ -431,10 +451,15 @@ class PersonaBot:
             f'"drivers": ["driver 1", "driver 2"], '
             f'"watch_next": ["watch 1", "watch 2"]}}'
         )
-        result = await _call_claude_json(PERSONA_SYSTEM, prompt, max_tokens=300)
+        result = await _call_claude_json(PERSONA_PROMPT, prompt, max_tokens=300)
         return result or _fallback_confidence_update(confidence_packet)
 
     async def daily_brief(self, brief_packet: dict) -> dict:
+        """
+        Generate the daily intelligence brief.
+        Input:  {date, top_catalysts, missions, positions, market_themes}
+        Output: {headline, sections[]}
+        """
         prompt = (
             f"Generate the daily intelligence brief.\n\n"
             f"Brief data: {json.dumps(brief_packet, indent=2)}\n\n"
@@ -447,23 +472,24 @@ class PersonaBot:
             f'{{"title": "What to Watch Today", "content": "bullet list as string"}}'
             f']}}'
         )
-        result = await _call_claude_json(PERSONA_SYSTEM, prompt, max_tokens=700)
+        result = await _call_claude_json(PERSONA_PROMPT, prompt, max_tokens=700)
         return result or _fallback_daily_brief(brief_packet)
 
     async def enrich_catalyst_for_storage(self, catalyst: dict) -> dict:
         """
         Called by CoS after creating/updating a catalyst.
         Generates the persona_summary field stored on the catalyst.
+        This is what the UI displays instead of raw signal text.
         """
         packet = {
-            "headline":   catalyst.get("headline", ""),
-            "wave":       catalyst.get("wave", "spark"),
-            "confidence": catalyst.get("confidence", 0.0),
-            "direction":  catalyst.get("direction", "neutral"),
-            "drivers":    catalyst.get("bull_factors", [])[:3],
+            "headline":    catalyst.get("headline", ""),
+            "wave":        catalyst.get("wave", "spark"),
+            "confidence":  catalyst.get("confidence", 0.0),
+            "direction":   catalyst.get("direction", "neutral"),
+            "drivers":     catalyst.get("bull_factors", [])[:3],
             "verification": {
                 "verified": catalyst.get("verified", False),
-                "verdict":  catalyst.get("verification", {}).get("verdict", ""),
+                "strength": "high" if catalyst.get("confidence", 0) > 0.7 else "medium",
             },
             "cross_asset": {
                 "assets":    catalyst.get("assets", [])[:5],
@@ -472,267 +498,176 @@ class PersonaBot:
             "affected_assets": catalyst.get("assets", []),
             "notes": catalyst.get("summary", ""),
         }
-        return await self.rewrite_catalyst(packet)
+        result = await self.rewrite_catalyst(packet)
+        return result
 
     async def generate_wave_transition_explanation(
         self,
-        catalyst:   dict,
-        from_wave:  str,
-        to_wave:    str,
-        reason:     str,
+        catalyst:  dict,
+        from_wave: str,
+        to_wave:   str,
+        reason:    str,
     ) -> dict:
-        """
-        Called on every wave promotion/demotion.
-        Returns explanation stored as persona_wave_note on the catalyst.
-        """
-        framing_from = WAVE_FRAMING.get(from_wave, {})
-        framing_to   = WAVE_FRAMING.get(to_wave, {})
+        """Called on every wave promotion/demotion by the CoS."""
         packet = {
-            "catalyst_id":  catalyst.get("id", ""),
-            "title":        catalyst.get("title", catalyst.get("headline", "")),
-            "from_wave":    from_wave,
-            "to_wave":      to_wave,
-            "reason":       reason,
-            "plain_from":   framing_from.get("plain", ""),
-            "plain_to":     framing_to.get("plain", ""),
-            "direction":    catalyst.get("direction", "neutral"),
-            "confidence":   catalyst.get("confidence", 0.0),
+            "catalyst_id": catalyst.get("id", ""),
+            "title":       catalyst.get("title", catalyst.get("headline", "")),
+            "from_wave":   from_wave,
+            "to_wave":     to_wave,
+            "reason":      reason,
+            "direction":   catalyst.get("direction", "neutral"),
+            "confidence":  catalyst.get("confidence", 0.0),
         }
         return await self.wave_transition(packet)
 
 
-# ─────────────────────────────────────────────────────────────────
-#  Sebastian class
-# ─────────────────────────────────────────────────────────────────
+# =============================================================================
+#  PersonaChatBot — trading-style interpreter (new, user-facing)
+# =============================================================================
 
-class Sebastian:
+class PersonaChatBot:
     """
-    User-facing analyst for Market Brain.
-    Invoked on demand. Fetches live context before every response.
-    Never influences the intelligence chain.
+    User-facing trading-style interpreter for Market Brain.
+
+    Completely separate from PersonaBot:
+      - Different role: style interpreter, not communication layer
+      - Different prompt: PERSONA_CHAT_PROMPT, not PERSONA_PROMPT
+      - Different output: natural conversational text, not structured JSON
+      - Different calling convention: multi-turn chat(), not one-shot packets
+
+    Called exclusively from POST /api/persona in app.py.
+    Never called from the intelligence chain (CoS, sweep engine, relay bot, workflow bot).
+
+    Prompt assembly order per spec:
+        context + PERSONA_CHAT_PROMPT + perplexity_verification + user_query
+    All context is assembled by the /api/persona endpoint before calling chat().
     """
 
-    def __init__(self):
-        self._mb_api_url = os.getenv("MB_API_URL", "http://localhost:8000")
+    def _build_system(
+        self,
+        live_prices:   str,
+        catalysts:     str,
+        verification:  str = "",
+        extra_context: str = "",
+        mode:          str = "auto",
+    ) -> str:
+        """
+        Assemble the full system prompt per spec.
+        Order: context -> PERSONA_CHAT_PROMPT -> verification -> extra_context
+        """
+        mode_note = {
+            "beginner": (
+                "\nLANGUAGE: The user is new to markets. Use plain English. "
+                "Explain trading style terminology the first time you use it."
+            ),
+            "expert": (
+                "\nLANGUAGE: The user is experienced. Use technical terminology freely. "
+                "Skip basic explanations of style concepts."
+            ),
+            "auto": (
+                "\nLANGUAGE: Calibrate to the question. Plain English first, "
+                "with technical depth for users who clearly have market experience."
+            ),
+        }.get(mode, "")
 
-    async def _fetch_live_context(self, cos_token: str) -> tuple[str, list, list]:
-        """
-        Fetch live prices + catalysts + opportunities.
-        Returns (prices_block, catalysts_list, opportunities_list).
-        """
-        from research_bots.opportunity_engine import (
-            get_live_price_context,
-            get_all_tracked_tickers,
-            get_opportunities_for_catalyst,
+        context_block = (
+            f"LIVE_MARKET_PRICES (fetched {time.strftime('%H:%M UTC')}):\n"
+            f"{live_prices}\n\n"
+            f"ACTIVE_INTELLIGENCE:\n"
+            f"{catalysts}\n\n"
         )
 
-        prices_block     = "  Prices temporarily unavailable."
-        catalysts_list   = []
-        opportunities_list = []
+        verification_block = (
+            f"\nPERPLEXITY_VERIFICATION:\n{verification}\n"
+            if verification and verification.strip() else ""
+        )
 
-        try:
-            # Live prices for all tracked tickers
-            all_tickers  = get_all_tracked_tickers()
-            prices_block = await get_live_price_context(all_tickers[:40])
-        except Exception as e:
-            log.warning(f"Sebastian: live prices error: {e}")
+        extra_block = (
+            f"\nADDITIONAL_CONTEXT:\n{extra_context}\n"
+            if extra_context and extra_context.strip() else ""
+        )
 
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get(
-                    f"{self._mb_api_url}/api/catalysts",
-                    headers={"Authorization": f"Bearer {cos_token}"},
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    catalysts_list = data.get("catalysts", data if isinstance(data, list) else [])
-                    # Sort by wave priority then confidence
-                    wave_order = {"regime": 5, "structural": 4, "escalation": 3, "confirmed": 2, "spark": 1}
-                    catalysts_list.sort(
-                        key=lambda c: (wave_order.get(c.get("wave", "spark"), 0), c.get("confidence", 0)),
-                        reverse=True,
-                    )
-        except Exception as e:
-            log.warning(f"Sebastian: catalysts fetch error: {e}")
+        return (
+            context_block
+            + PERSONA_CHAT_PROMPT
+            + mode_note
+            + verification_block
+            + extra_block
+        )
 
-        try:
-            # Get opportunities from top escalating catalyst
-            escalating = [c for c in catalysts_list if c.get("wave") in ("escalation", "structural", "regime")]
-            if escalating:
-                opp_result = await get_opportunities_for_catalyst(escalating[0])
-                opportunities_list = opp_result.get("opportunities", [])
-        except Exception as e:
-            log.warning(f"Sebastian: opportunities error: {e}")
-
-        return prices_block, catalysts_list, opportunities_list
-
-    async def answer(
+    async def chat(
         self,
-        question:  str,
-        cos_token: str,
-        user_mode: str = "auto",
-        history:   list = None,
-    ) -> dict:
+        question:      str,
+        history:       list,
+        live_prices:   str,
+        catalysts:     str,
+        verification:  str = "",
+        extra_context: str = "",
+        mode:          str = "auto",
+    ) -> str:
         """
-        Main Sebastian entry point.
+        Main entry point for Persona Bot conversational chat.
+        Called from POST /api/persona in app.py.
 
         Args:
-            question:  the user's question
-            cos_token: JWT for internal API calls
-            user_mode: "beginner" | "expert" | "auto"
-            history:   previous messages [{"role": ..., "content": ...}]
+            question:      The user question (stripped by caller).
+            history:       Previous turns [{role, content}]. Last 12 used.
+            live_prices:   Live price block fetched by /api/persona endpoint.
+            catalysts:     Catalyst context block fetched by /api/persona endpoint.
+            verification:  Perplexity verification block (string, optional).
+            extra_context: Extra context from frontend (focused catalyst, asset focus, etc.).
+            mode:          beginner | expert | auto
 
         Returns:
-            {
-                "response":          str,   # Sebastian's answer
-                "entry_prompt":      str,   # contextual wave/bias prompt if relevant
-                "wave_framing":      dict,  # plain-English wave explanation if relevant
-                "top_opportunities": list,  # top 3 opportunities mentioned
-                "prices_fetched":    int,   # number of live prices injected
-                "catalysts_used":    int,   # number of catalysts in context
-            }
+            str: Persona Bot response text.
         """
-        prices_block, catalysts_list, opportunities_list = await self._fetch_live_context(cos_token)
-
-        catalysts_block    = _format_catalysts_for_sebastian(catalysts_list)
-        opportunities_block = _format_opportunities_for_sebastian(opportunities_list)
-        system             = _build_sebastian_system(
-            prices_block, catalysts_block, opportunities_block, user_mode
+        system = self._build_system(
+            live_prices=live_prices,
+            catalysts=catalysts,
+            verification=verification,
+            extra_context=extra_context,
+            mode=mode,
         )
 
-        # Build message history
         messages = []
-        if history:
-            for msg in history[-10:]:  # last 10 turns for context
-                if msg.get("role") in ("user", "assistant") and msg.get("content"):
-                    messages.append({"role": msg["role"], "content": msg["content"]})
+        for msg in history[-12:]:
+            role    = msg.get("role", "")
+            content = msg.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": str(content)[:2000]})
         messages.append({"role": "user", "content": question})
 
-        response_text = None
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(
-                    ANTHROPIC_URL,
-                    headers={
-                        "x-api-key":         ANTHROPIC_KEY,
-                        "anthropic-version": "2023-06-01",
-                        "content-type":      "application/json",
-                    },
-                    json={
-                        "model":      ANTHROPIC_MODEL,
-                        "max_tokens": 1000,
-                        "system":     system,
-                        "messages":   messages,
-                    },
-                )
-                if r.status_code == 200:
-                    response_text = r.json().get("content", [{}])[0].get("text", "").strip()
-        except Exception as e:
-            log.warning(f"Sebastian Claude call error: {e}")
+        response = await _call_claude_text(system, messages, max_tokens=1100)
 
-        if not response_text:
-            response_text = (
+        if not response:
+            return (
                 "I'm having trouble connecting right now. "
-                "The intelligence data above is still valid — "
-                "check the signals panel for the current picture."
+                "The intelligence data is still available — "
+                "try rephrasing your question, or switch to Sebastian for analysis."
             )
 
-        # Determine if any specific wave/asset was mentioned for entry prompt
-        top_catalyst    = catalysts_list[0] if catalysts_list else {}
-        top_wave        = top_catalyst.get("wave", "spark")
-        top_bias        = top_catalyst.get("direction", "neutral")
-        entry_prompt    = get_entry_prompt(top_bias, top_wave)
-        wave_framing    = get_wave_framing(top_wave)
-        top_opps        = opportunities_list[:3]
-
-        # Count live prices fetched
-        prices_fetched = prices_block.count("USD") + prices_block.count("GBX") + prices_block.count("GBP")
-
-        return {
-            "response":          response_text,
-            "entry_prompt":      entry_prompt,
-            "wave_framing":      wave_framing,
-            "top_opportunities": top_opps,
-            "prices_fetched":    prices_fetched,
-            "catalysts_used":    len(catalysts_list),
-        }
-
-    async def explain_wave(self, wave: str, asset: str = "", bias: str = "neutral") -> str:
-        """
-        Beginner-friendly explanation of a specific wave state.
-        Used for onboarding prompts and card tooltips.
-        """
-        framing = WAVE_FRAMING.get(wave, WAVE_FRAMING["spark"])
-        entry   = get_entry_prompt(bias, wave)
-
-        if not ANTHROPIC_KEY:
-            return f"{framing['plain']} {entry}"
-
-        system = (
-            "You are Sebastian, a market intelligence analyst. "
-            "Explain the concept requested in 2-3 short sentences. "
-            "Lead with a plain-English explanation a complete beginner can understand. "
-            "Then add one sentence of technical context. "
-            "Do not mention buying or selling. Be warm and clear."
-        )
-        prompt = (
-            f"Explain the '{wave}' wave state in Market Brain's intelligence system"
-            f"{f' in the context of {asset}' if asset else ''}. "
-            f"Plain-English meaning: '{framing['plain']}'. "
-            f"Technical meaning: '{framing['meaning']}'."
-        )
-        result = await _call_claude_text(system, prompt, max_tokens=200)
-        return result or f"{framing['plain']} {entry}"
-
-    async def quick_summary(self, catalyst: dict) -> str:
-        """
-        One-paragraph quick summary of a single catalyst for card display.
-        Uses persona_summary if available, otherwise generates fresh.
-        """
-        persona = catalyst.get("persona_summary", {})
-        if persona and persona.get("summary"):
-            return persona["summary"]
-
-        title     = catalyst.get("title", catalyst.get("headline", ""))
-        wave      = catalyst.get("wave", "spark")
-        direction = catalyst.get("direction", "neutral")
-        framing   = WAVE_FRAMING.get(wave, WAVE_FRAMING["spark"])
-        entry     = get_entry_prompt(direction, wave)
-
-        if not ANTHROPIC_KEY:
-            return f"{title}. {framing['plain']}"
-
-        system = (
-            "You are Sebastian. Write a single short paragraph (2-3 sentences) "
-            "summarising this market signal for a dashboard card. "
-            "Plain English first. No jargon without explanation. "
-            "No buy/sell advice. Be factual and clear."
-        )
-        prompt = (
-            f"Summarise: {title}\n"
-            f"Wave: {wave} ({framing['plain']})\n"
-            f"Direction: {direction}\n"
-            f"Entry prompt: {entry}"
-        )
-        result = await _call_claude_text(system, prompt, max_tokens=150)
-        return result or f"{title}. {framing['plain']}"
+        return response
 
 
-# ─────────────────────────────────────────────────────────────────
+# =============================================================================
 #  Module-level singletons
-# ─────────────────────────────────────────────────────────────────
+# =============================================================================
 
-_persona_bot: Optional[PersonaBot] = None
-_sebastian:   Optional[Sebastian]  = None
+_persona_bot:      Optional[PersonaBot]     = None
+_persona_chat_bot: Optional[PersonaChatBot] = None
+
 
 def get_persona_bot() -> PersonaBot:
+    """Singleton accessor for PersonaBot — the CoS communication layer."""
     global _persona_bot
     if _persona_bot is None:
         _persona_bot = PersonaBot()
     return _persona_bot
 
-def get_sebastian() -> Sebastian:
-    global _sebastian
-    if _sebastian is None:
-        _sebastian = Sebastian()
-    return _sebastian
+
+def get_persona_chat_bot() -> PersonaChatBot:
+    """Singleton accessor for PersonaChatBot — the user-facing trading-style interpreter."""
+    global _persona_chat_bot
+    if _persona_chat_bot is None:
+        _persona_chat_bot = PersonaChatBot()
+    return _persona_chat_bot
