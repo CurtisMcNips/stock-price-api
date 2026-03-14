@@ -50,7 +50,7 @@ REQUEST_TIMEOUT = 8
 # Anthropic / Sebastian
 ANTHROPIC_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL = "claude-sonnet-4-5"
+ANTHROPIC_MODEL = "claude-3-5-sonnet-20241022"   # proven valid model ID
 
 YAHOO_URL          = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 YAHOO_FALLBACK_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
