@@ -665,11 +665,38 @@ function IntelCard({asset,intel,selected,onSelect,fmtMoney,isWatching}){
 //  SEBASTIAN API  (routes through backend — API key server-side)
 // ─────────────────────────────────────────────────────────────
 async function callSebastian(question, history=[], mode="auto", context={}){
+  // Sebastian — analyst endpoint
   const j=await api("/api/sebastian",{
     method:"POST",
     body:JSON.stringify({question,history,mode,context}),
   });
-  return j.response||"Sebastian couldn't respond right now.";
+  return {response:j.response||"No response received.", agent:"sebastian"};
+}
+
+async function callPersona(question, history=[], mode="auto", context={}){
+  // Persona Bot — trading-style interpreter endpoint (separate)
+  const j=await api("/api/persona",{
+    method:"POST",
+    body:JSON.stringify({question,history,mode,context}),
+  });
+  return {response:j.response||"No response received.", agent:"persona"};
+}
+
+// Persona Bot trigger phrases — used by auto-routing
+const PERSONA_TRIGGERS=[
+  "momentum trader","defensive allocator","macro swing","swing trader",
+  "value investor","contrarian","technical trader","risk-off","risk-on",
+  "how would a","how does a","from a trader","trading style","event-driven",
+  "growth investor","how a trader","what would a","through the lens",
+  "commodities specialist","geopolitical risk trader","quant trader",
+  "mean-reversion","risk-on allocator","risk-off allocator",
+];
+
+function detectAgent(question, forcedAgent="auto"){
+  if(forcedAgent==="sebastian") return "sebastian";
+  if(forcedAgent==="persona")   return "persona";
+  const q=question.toLowerCase();
+  return PERSONA_TRIGGERS.some(t=>q.includes(t)) ? "persona" : "sebastian";
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -934,7 +961,14 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
   const[input,setInput]=useState(initialQuestion);
   const[loading,setLoading]=useState(false);
   const[mode,setMode]=useState("auto");
+  const[agent,setAgent]=useState("auto"); // auto | sebastian | persona
   const bottomRef=useRef(null);
+
+  const AGENT_CFG={
+    sebastian:{label:"SEBASTIAN",color:"var(--blue)",desc:"Analyst · Catalyst breakdown · Signal interpretation"},
+    persona:{label:"PERSONA BOT",color:"var(--purple)",desc:"Trading-style interpreter · How different traders see it"},
+    auto:{label:"AUTO",color:"var(--text3)",desc:"Routes automatically based on your question"},
+  };
 
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
 
@@ -951,8 +985,9 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
       [],
       mode,
       {},
-    ).then(reply=>{
-      setMessages([{role:"assistant",content:reply}]);
+    ).then(result=>{
+      const reply=typeof result==="string"?result:result.response;
+      setMessages([{role:"assistant",content:reply,agent:"sebastian"}]);
       setLoading(false);
     }).catch(()=>{
       setMessages([{role:"assistant",content:"Hi — I'm Sebastian. I have live prices and the full intelligence chain loaded.\n\nAsk me anything about the market, a specific catalyst, or what the bots are seeing right now."}]);
@@ -969,15 +1004,18 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
     setMessages(p=>[...p,userMsg]);
     setLoading(true);
     try{
-      const reply=await callSebastian(
+      // Route to the correct endpoint based on agent selector or auto-detection
+      const activeAgent=detectAgent(question,agent);
+      const callFn=activeAgent==="persona"?callPersona:callSebastian;
+      const result=await callFn(
         question,
         messages.slice(-10),
         mode,
         initialContext,
       );
-      setMessages(p=>[...p,{role:"assistant",content:reply}]);
+      setMessages(p=>[...p,{role:"assistant",content:result.response,agent:result.agent}]);
     }catch(e){
-      setMessages(p=>[...p,{role:"assistant",content:`Sorry, I had trouble with that. Error: ${e.message||"unknown"}. Please try again.`}]);
+      setMessages(p=>[...p,{role:"assistant",content:`Sorry, I had trouble with that. Error: ${e.message||"unknown"}. Please try again.`,agent:"sebastian"}]);
     }
     setLoading(false);
   };
@@ -997,9 +1035,29 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
       <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:"var(--bg2)"}}>
         <div>
           <div style={{fontFamily:"'Barlow Condensed'",fontSize:15,fontWeight:700,color:"#e0e4ff",letterSpacing:1}}>SEBASTIAN</div>
-          <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>Live prices · Intelligence chain · All catalysts loaded</div>
+          <div style={{fontSize:7,color:"var(--text3)",marginTop:1}}>
+            {agent==="persona"?"Persona Bot · "+AGENT_CFG.persona.desc
+             :agent==="sebastian"?"Sebastian · "+AGENT_CFG.sebastian.desc
+             :"Auto-routing · Live prices · Intelligence chain"}
+          </div>
         </div>
         <div style={{display:"flex",gap:5,alignItems:"center"}}>
+          {/* Agent selector */}
+          <div style={{display:"flex",gap:3}}>
+            {[["auto","AUTO"],["sebastian","SEBASTIAN"],["persona","PERSONA"]].map(([v,l])=>{
+              const ac=AGENT_CFG[v]||AGENT_CFG.auto;
+              return(
+                <button key={v} onClick={()=>setAgent(v)} style={{
+                  background:agent===v?ac.color+"22":"transparent",
+                  border:`1px solid ${agent===v?ac.color+"55":"var(--border)"}`,
+                  borderRadius:4,padding:"3px 8px",
+                  color:agent===v?ac.color:"var(--text3)",
+                  fontSize:7,letterSpacing:.5
+                }}>{l}</button>
+              );
+            })}
+          </div>
+          {/* Mode selector */}
           <div style={{display:"flex",border:"1px solid var(--border2)",borderRadius:4,overflow:"hidden"}}>
             {[["auto","AUTO"],["beginner","SIMPLE"],["expert","EXPERT"]].map(([v,l])=>(
               <button key={v} onClick={()=>setMode(v)} style={{background:mode===v?"var(--blue)22":"transparent",border:"none",padding:"3px 7px",color:mode===v?"var(--blue)":"var(--text3)",fontSize:7,letterSpacing:.5}}>{l}</button>
@@ -1020,7 +1078,11 @@ function SebastianPage({initialQuestion="",initialContext={},onClose,asModal=fal
             borderRadius:6,padding:"8px 10px",
             animation:"fadeUp 0.15s ease",
           }}>
-            <div style={{fontSize:7,color:m.role==="user"?"var(--blue)":"var(--text3)",letterSpacing:1,marginBottom:3}}>{m.role==="user"?"YOU":"SEBASTIAN"}</div>
+            {(()=>{
+              if(m.role==="user") return <div style={{fontSize:7,color:"var(--blue)",letterSpacing:1,marginBottom:3}}>YOU</div>;
+              const ac=AGENT_CFG[m.agent||"sebastian"]||AGENT_CFG.sebastian;
+              return <div style={{fontSize:7,color:ac.color,letterSpacing:1,marginBottom:3}}>{ac.label}</div>;
+            })()}
             <div style={{fontSize:10,color:"#b0b4d0",lineHeight:1.65,whiteSpace:"pre-wrap"}}>{m.content}</div>
           </div>
         ))}
@@ -1101,8 +1163,9 @@ function SebastianModal({asset,intel,fmtMoney,onClose}){
     try{
       // Build asset context for Sebastian
       const assetContext=`Current asset: ${asset.ticker} (${asset.name}) — ${asset.sector}/${asset.sub}\nPrice: ${fmtMoney(intel.price)} | Change: ${fmtPct(intel.changePct)}\nWave: ${intel.wave} | Confidence: ${intel.confidence}% | Bias: ${intel.bias}\nSignals: ${intel.signals.map(s=>`${s.bot}: ${s.text}`).join("; ")}`;
-      const reply=await callSebastian(input.trim(),messages.slice(-8),"auto",{asset_context:assetContext});
-      setMessages(p=>[...p,{role:"assistant",content:reply}]);
+      const result=await callSebastian(input.trim(),messages.slice(-8),"auto",{asset_context:assetContext});
+      const reply=typeof result==="string"?result:result.response;
+      setMessages(p=>[...p,{role:"assistant",content:reply,agent:"sebastian"}]);
     }catch(e){
       setMessages(p=>[...p,{role:"assistant",content:`I had trouble with that request. Error: ${e.message}. Please try again.`}]);
     }
