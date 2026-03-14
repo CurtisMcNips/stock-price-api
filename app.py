@@ -27,12 +27,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 # Persona Bot — user-facing trading-style interpreter
+# persona_bot.py lives in research_bots/ — add to path before importing
 try:
+    import sys as _sys
+    _bots_dir = os.path.join(os.path.dirname(__file__), "research_bots")
+    if _bots_dir not in _sys.path:
+        _sys.path.insert(0, _bots_dir)
     from persona_bot import get_persona_chat_bot, PersonaChatBot
     _PERSONA_AVAILABLE = True
-except ImportError:
+    log.info("PersonaChatBot loaded from research_bots/persona_bot.py")
+except ImportError as _e:
     _PERSONA_AVAILABLE = False
-    log.warning("persona_bot not found — /api/persona will be unavailable")
+    log.warning(f"persona_bot import failed — /api/persona unavailable: {_e}")
 
 # ── Config ────────────────────────────────────────────────────
 REDIS_URL       = os.environ.get("REDIS_URL", "redis://localhost:6379")
@@ -44,7 +50,7 @@ REQUEST_TIMEOUT = 8
 # Anthropic / Sebastian
 ANTHROPIC_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+ANTHROPIC_MODEL = "claude-sonnet-4-5"
 
 YAHOO_URL          = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 YAHOO_FALLBACK_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
